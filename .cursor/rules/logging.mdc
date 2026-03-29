@@ -1,0 +1,70 @@
+---
+description: Structured logging with structlog — required fields, formats, and forbidden content
+alwaysApply: true
+---
+
+# Logging Conventions
+
+## Library
+
+Use `structlog` exclusively. Never use `print()` or the stdlib `logging` module directly
+(structlog wraps it — configure stdlib through structlog's setup).
+
+## Required Fields
+
+Every log entry must include:
+
+| Field | Source | Example |
+|---|---|---|
+| `module` | module name constant | `"search"` |
+| `operation` | function/use-case name | `"execute_search"` |
+| `request_id` | context var injected by middleware | `"uuid4-string"` |
+
+```python
+import structlog
+
+logger = structlog.get_logger()
+
+async def execute_search(query: SearchQuery) -> SearchResult:
+    log = logger.bind(module="search", operation="execute_search")
+    log.info("search_started", query_text=query.text)
+    # ...
+    log.info("search_completed", hits=len(results), latency_ms=elapsed)
+```
+
+## Log Levels
+
+- `DEBUG` — internal steps, intermediate values (dev only)
+- `INFO` — operation start/completion, normal flow
+- `WARNING` — recoverable issues (retry, fallback used)
+- `ERROR` — failures that need attention
+
+## LLM Call Logging
+
+Every LLM call must log:
+```python
+log.info(
+    "llm_call_completed",
+    model=response.model,
+    prompt_tokens=response.usage.prompt_tokens,
+    completion_tokens=response.usage.completion_tokens,
+    latency_ms=elapsed_ms,
+)
+```
+
+## Output Format
+
+- **Development**: human-readable console output (structlog `ConsoleRenderer`)
+- **Production**: JSON (`structlog.processors.JSONRenderer`)
+
+Configured once in `src/shared/infrastructure/logging.py` via `APP_ENV` setting.
+
+## Forbidden in Logs
+
+```python
+# ❌ NEVER log
+log.info("user data", password=user.password)        # secrets
+log.info("request", body=request.body)               # full request bodies (may contain PII)
+log.info(f"processing {user.email}")                 # PII in message string
+log.info("done " + str(result))                      # string concatenation — use kwargs
+```

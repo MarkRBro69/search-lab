@@ -1,0 +1,62 @@
+---
+description: uv, ruff, and pytest usage conventions
+alwaysApply: true
+---
+
+# Tooling Conventions
+
+## Package Management — uv
+
+```powershell
+# ✅ Add a dependency
+uv add fastapi
+
+# ✅ Add a dev dependency
+uv add --dev pytest pytest-asyncio
+
+# ✅ Install all dependencies
+uv sync --all-extras
+
+# ✅ Run a script/command in the project environment
+uv run pytest
+uv run uvicorn src.main:app --reload
+
+# ❌ NEVER use pip directly
+pip install fastapi
+```
+
+All dependencies must be declared in `pyproject.toml`. The `uv.lock` file must be committed.
+
+## Code Quality — ruff
+
+ruff handles **everything**: linting, formatting, import sorting.
+Never configure black, isort, or flake8 separately.
+
+```powershell
+# Check for issues (with auto-fix where safe)
+uv run ruff check . --fix
+
+# Format code
+uv run ruff format .
+
+# Both at once (CI order)
+uv run ruff check . && uv run ruff format --check .
+```
+
+Configuration lives in `pyproject.toml [tool.ruff]` — do not create `.ruff.toml`.
+
+## Testing — pytest
+
+```powershell
+# Run all tests
+uv run pytest
+
+# Run specific module
+uv run pytest tests/unit/modules/search/
+
+# Run with coverage
+uv run pytest --cov=src --cov-report=term-missing
+```
+
+- `asyncio_mode = "auto"` is set in `pyproject.toml` — no need for `@pytest.mark.asyncio`
+- Async test functions work out of the box: `async def test_something(): ...`

@@ -1,0 +1,42 @@
+---
+description: Communication language, shell, OS, and response style
+alwaysApply: true
+---
+
+# Communication
+
+## Language
+
+- **Response language**: Russian (ru)
+- Always respond to the user in Russian
+- Code comments — English (project convention)
+- Commit messages — English (conventional commits)
+
+## Environment
+
+- **OS**: Windows 10
+- **Shell**: PowerShell
+
+## Terminal Commands
+
+Always use PowerShell syntax:
+
+```powershell
+# ✅ CORRECT
+$env:VAR = "value"
+Copy-Item src\file.py dst\file.py
+Remove-Item -Recurse dist\
+
+# ❌ WRONG
+export VAR=value
+cp src/file.py dst/file.py
+rm -rf dist/
+```
+
+Paths use backslash: `src\modules\search\`
+
+## Response Style
+
+- **Confirmation**: show plan and wait for confirmation before multi-step operations
+- **Verbosity**: detailed — explain decisions, not just actions ("why", not just "what")
+- **Show diffs**: show file changes before applying them

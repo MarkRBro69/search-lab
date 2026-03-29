@@ -1,0 +1,106 @@
+---
+description: OpenSearch client patterns, query DSL, and index conventions
+globs: "src/modules/search/infrastructure/**/*.py"
+alwaysApply: false
+---
+
+# OpenSearch Patterns
+
+## Client Lifecycle
+
+The OpenSearch client is a **synchronous** `OpenSearch` singleton from `opensearchpy`.
+It is created on startup via `get_client()` in FastAPI lifespan and closed with `close_client_sync()` on shutdown.
+Inject the client where needed — never instantiate it inside a handler.
+
+```python
+# src/shared/infrastructure/opensearch.py
+from opensearchpy import OpenSearch
+
+_client: OpenSearch | None = None
+
+def get_client() -> OpenSearch:
+    ...
+```
+
+## Async I/O — Sync Client + `run_in_executor`
+
+The application layer stays async: blocking OpenSearch calls run in the default thread pool via `asyncio.get_running_loop().run_in_executor`, typically with `functools.partial` to bind the client and parameters.
+
+```python
+from functools import partial
+import asyncio
+
+loop = asyncio.get_running_loop()
+raw = await loop.run_in_executor(None, partial(search_bm25, client, params))
+```
+
+Use this pattern for any sync `client.search`, `client.get`, `client.explain`, `client.rank_eval`, etc., when called from async service functions.
+
+## Query DSL — Dict Builders (Infrastructure)
+
+In this project, search bodies are built as `dict` values in the infrastructure layer using dedicated helpers — not abstract dataclass `to_dict()` trees.
+
+Examples from `src/modules/search/infrastructure/repository.py`:
+
+```python
+def _bm25_body(params: SearchParams, size: int, include_explain: bool = False) -> dict:
+    filters = build_filters(params)
+    multi_match: dict = {
+        "query": params.q,
+        "fields": _BM25_FIELDS.get(params.index_key, _BM25_FIELDS["all"]),
+        "type": "best_fields",
+        "fuzziness": "AUTO",
+    }
+    if filters:
+        body: dict = {
+            "size": size,
+            "query": {"bool": {"must": {"multi_match": multi_match}, "filter": filters}},
+        }
+    else:
+        body = {"size": size, "query": {"multi_match": multi_match}}
+    if include_explain:
+        body["explain"] = True
+    return body
+
+
+def _knn_body(vector: list[float], params: SearchParams, size: int) -> dict:
+    filters = build_filters(params)
+    knn_clause: dict = {"vector": vector, "k": size}
+    if filters:
+        knn_clause["filter"] = {"bool": {"filter": filters}}
+    return {"size": size, "query": {"knn": {"embedding": knn_clause}}}
+```
+
+Public functions take `(client: OpenSearch, ...)` and pass these bodies to `client.search(index=..., body=...)`.
+
+## Index Naming Convention
+
+```
+{APP_ENV}_{collection_type}_v1
+```
+
+`APP_ENV` comes from the `APP_ENV` environment variable (default `development`). Examples:
+
+```
+development_procedures_v1
+development_doctors_v1
+development_reviews_v1
+```
+
+Aliases like `INDEX_ALIAS` map logical keys (`"procedures"`, `"doctors"`, `"reviews"`, `"all"`) to one or more index names. Derive names from `APP_ENV` / constants in `repository.py` — do not hardcode full index strings in multiple places.
+
+## Bulk Operations
+
+For indexing many documents, use the synchronous `opensearchpy.helpers.bulk` with the sync client (e.g. in `scripts/seed.py`). Avoid per-document `index()` loops for large loads.
+
+```python
+from opensearchpy.helpers import bulk
+
+# sync client + bulk helper (wrap in run_in_executor if invoked from async code)
+success, errors = bulk(client, actions, chunk_size=500, raise_on_error=False)
+```
+
+## Error Handling
+
+Catch `opensearchpy.exceptions.NotFoundError` and `TransportError` at the repository level.
+Map them to domain exceptions before returning to the application layer.

@@ -1,0 +1,86 @@
+---
+description: LLM client patterns, tool schemas, logging, and reliability requirements
+globs: "src/modules/agents/**/*.py"
+alwaysApply: false
+---
+
+# LLM Agent Integration Patterns
+
+## Abstract Client
+
+All LLM calls go through `BaseLLMClient`. Never call provider SDKs directly in use cases.
+
+```python
+# src/shared/infrastructure/llm/base.py
+from abc import ABC, abstractmethod
+
+class BaseLLMClient(ABC):
+    @abstractmethod
+    async def complete(self, request: LLMRequest) -> LLMResponse: ...
+
+    @abstractmethod
+    async def complete_with_tools(
+        self, request: LLMRequest, tools: list[ToolSchema]
+    ) -> LLMToolCallResponse: ...
+```
+
+Inject via `Depends()` — allows swapping providers and mocking in tests.
+
+## Tool Schemas — Pydantic Models
+
+Every tool/function schema must be a typed Pydantic model. No raw dicts.
+
+```python
+# ✅ CORRECT
+class SearchToolInput(BaseModel):
+    query: str = Field(description="Search query text")
+    max_results: int = Field(default=5, ge=1, le=20, description="Max results to return")
+
+class SearchToolOutput(BaseModel):
+    hits: list[SearchHit]
+    total: int
+
+# ❌ WRONG
+tool_input = {"query": "...", "max_results": 5}
+```
+
+## Required Logging Per LLM Call
+
+```python
+log.info(
+    "llm_call_completed",
+    module="agents",
+    operation="tool_call",
+    model=response.model,
+    tool_name=tool_name,
+    prompt_tokens=response.usage.prompt_tokens,
+    completion_tokens=response.usage.completion_tokens,
+    latency_ms=elapsed_ms,
+)
+```
+
+## Timeout and Retry
+
+Every LLM call must have explicit timeout and retry configuration.
+
+```python
+# ✅ CORRECT
+result = await llm_client.complete(
+    request,
+    timeout=settings.llm_timeout_seconds,
+    max_retries=3,
+    retry_on=(TimeoutError, RateLimitError),
+)
+```
+
+Never let LLM calls run indefinitely. Default timeout: `LLM_TIMEOUT_SECONDS` from settings.
+
+## Agent Step Logging
+
+Log the beginning and end of every agent reasoning step, including input context size.
+
+```python
+log.debug("agent_step_started", step=step_name, context_tokens=len(context))
+# ... step execution ...
+log.info("agent_step_completed", step=step_name, output_tokens=len(output), latency_ms=elapsed)
+```

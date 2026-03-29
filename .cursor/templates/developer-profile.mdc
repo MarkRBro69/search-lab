@@ -1,0 +1,33 @@
+---
+description: Personal developer profile — copy to .cursor/rules/local/ and fill in your settings
+alwaysApply: true
+---
+
+# Developer Profile
+
+> Copy this file to `.cursor/rules/local/my-profile.mdc` and fill in your settings.
+> This file is gitignored — your settings stay local to your machine.
+> See `docs/developer-setup.md` for detailed instructions.
+
+## Environment
+
+- **OS**: [windows | macos | linux]
+- **Shell**: [powershell | bash | zsh]
+
+## Communication
+
+- **Language**: [ru | en]
+  - When set to `ru`: respond in Russian, use Russian in comments and commit messages
+  - When set to `en`: respond in English
+
+## Terminal Commands
+
+- **Command style**: always use [PowerShell | bash] syntax when suggesting terminal commands
+- Example (PowerShell): `$env:VAR = "value"` instead of `export VAR=value`
+- Example (bash): `export VAR=value` instead of `$env:VAR = "value"`
+
+## Agent Behavior
+
+- **Confirmation**: [yes | no] — ask for confirmation before executing multi-step plans
+- **Verbosity**: [concise | detailed] — level of explanation in responses
+- **Show diffs**: [yes | no] — show file diffs before applying changes

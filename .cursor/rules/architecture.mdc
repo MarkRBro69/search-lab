@@ -1,0 +1,78 @@
+---
+description: Clean Architecture + Modular Monolith structure and dependency rules
+alwaysApply: true
+---
+
+# Architecture Rules
+
+## Modular Monolith
+
+Each feature lives in `src/modules/{name}/`. Modules are independent vertical slices.
+
+```
+src/modules/
+  search/                    ← search algorithms, indexing, per-query eval metrics
+    api.py                   ← public interface (the ONLY file other modules may import)
+    presentation/            ← FastAPI routers, request/response Pydantic schemas
+    application/             ← search_service, eval_service, indexing_service
+    infrastructure/          ← OpenSearch repository (BM25, KNN, RRF, rank_eval)
+  experiments/               ← CORE MODULE: benchmark platform
+    api.py                   ← public interface
+    domain/                  ← Algorithm, QueryTemplate, BenchmarkRun aggregates
+    application/             ← experiments_service (async N×M benchmark runner)
+    infrastructure/          ← MongoDB repository (algorithms, templates, runs)
+    presentation/            ← /experiments/algorithms, /templates, /benchmark routes
+  agents/                    ← (stub) LLM enrichment — future work
+    api.py
+src/shared/                  ← cross-cutting: OpenSearch client, MongoDB client, embeddings
+```
+
+### Module Roles
+
+| Module | Layer emphasis | External dependency |
+|---|---|---|
+| `search` | application-heavy | OpenSearch |
+| `experiments` | domain-heavy (aggregates) | MongoDB + `search` module via `api.py` |
+| `agents` | stub | (future: LLM API) |
+
+## Dependency Rule
+
+Direction: `Presentation → Application → Domain ← Infrastructure`
+
+```python
+# ❌ NEVER — infrastructure importing from presentation
+# src/modules/search/infrastructure/repo.py
+from src.modules.search.presentation.schemas import SearchRequest
+
+# ✅ CORRECT — infrastructure depends on application/domain interfaces
+from src.modules.search.application.ports import SearchRepositoryPort
+```
+
+## Module Boundaries
+
+```python
+# ❌ NEVER — importing module internals from another module
+from src.modules.search.infrastructure.opensearch_repo import OpenSearchRepo
+
+# ✅ CORRECT — only through the public api.py
+from src.modules.search.api import search_documents
+```
+
+## When to Add Domain Layer
+
+Add `domain/` only when the module has non-trivial business logic:
+- Complex invariants or validation rules
+- Domain events
+- Multiple aggregates with relationships
+
+Skip `domain/` for simple CRUD or query-only modules.
+
+## Shared Code
+
+`src/shared/` is for cross-cutting concerns only:
+- Base entity / value object classes
+- Config loading (pydantic-settings)
+- Logging setup
+- Common exceptions
+
+Never put feature-specific code in `src/shared/`.

@@ -1,0 +1,102 @@
+---
+description: FastAPI router, dependency injection, and error handling patterns
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# FastAPI Conventions
+
+## Router Placement
+
+Routers live in `presentation/` layer of each module. Register them in `src/main.py`.
+
+Endpoints resolve shared clients via `Depends()`, then call **async service functions** (not class-based use cases).
+
+```python
+# src/modules/search/presentation/router.py (pattern)
+from typing import Annotated
+from fastapi import APIRouter, Depends
+from opensearchpy import OpenSearch
+from src.modules.search.application.search_params import SearchParams
+from src.modules.search.application.search_service import search
+from src.modules.search.presentation.schemas import SearchResponse
+from src.shared.infrastructure.opensearch import get_client
+
+router = APIRouter(prefix="/search", tags=["search"])
+
+def _os_client() -> OpenSearch:
+    return get_client()
+
+OSClient = Annotated[OpenSearch, Depends(_os_client)]
+
+@router.get("", response_model=SearchResponse)
+async def search_endpoint(client: OSClient, ...) -> SearchResponse:
+    params = SearchParams(...)
+    result = await search(client, params)
+    return SearchResponse(**result)
+```
+
+## Schemas — Pydantic v2
+
+All request and response bodies must be Pydantic v2 models. No raw dicts in endpoints.
+
+```python
+# ✅ CORRECT
+class SearchRequest(BaseModel):
+    query: str
+    size: int = Field(default=10, ge=1, le=100)
+    filters: list[SearchFilter] = Field(default_factory=list)
+
+# ❌ WRONG
+async def search(body: dict) -> dict: ...
+```
+
+## Dependency Injection
+
+Use FastAPI's `Depends()` to inject **clients and database handles**. Application logic lives in **module service functions** (`application/*.py`); routers call those functions directly.
+
+Prefer a small dependency function plus `Annotated` alias for reuse:
+
+```python
+from typing import Annotated
+from fastapi import Depends
+from opensearchpy import OpenSearch
+from src.shared.infrastructure.opensearch import get_client
+
+def _os_client() -> OpenSearch:
+    return get_client()
+
+OSClient = Annotated[OpenSearch, Depends(_os_client)]
+```
+
+MongoDB example (`experiments` router): `get_db()` behind `_db()`, then `MongoDb = Annotated[object, Depends(_db)]` (Motor `AsyncIOMotorDatabase` typed loosely in DI). Route handlers take `db: MongoDb`, `client: OSClient` and pass them into `experiments_service.*` async functions.
+
+## Error Handling
+
+Use centralized exception handlers registered in `src/main.py`.
+Never raise `HTTPException` from application or domain layers — only from presentation.
+
+```python
+# ✅ application layer raises domain exception
+raise SearchIndexNotFoundError(f"Index {index_name} does not exist")
+
+# ✅ presentation layer / exception handler maps it
+@app.exception_handler(SearchIndexNotFoundError)
+async def handle_index_not_found(request: Request, exc: SearchIndexNotFoundError):
+    return JSONResponse(status_code=404, content={"detail": str(exc)})
+```
+
+## Lifespan
+
+Use `asynccontextmanager` lifespan for startup/shutdown (not deprecated `on_event`).
+
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    get_client()          # sync OpenSearch singleton
+    get_db()              # Motor MongoDB
+    get_model()           # embedding model warmup
+    yield
+    close_client_sync()   # OpenSearch
+    await close_mongo()   # Motor
+```

@@ -1,0 +1,370 @@
+---
+description: 5-stage subagent pipeline for feature development
+alwaysApply: true
+---
+
+# Agent Workflow — Subagent Pipeline
+
+Every non-trivial request runs as a chain of isolated subagents.
+Each stage receives only its handoff document — no prior conversation history.
+
+## Tool Priority
+
+For file operations always prefer built-in tools over shell commands:
+
+| Task | Use | Not |
+|---|---|---|
+| Search in files | `Grep` | `rg`, `Select-String` |
+| Find files by name/pattern | `Glob` | `Get-ChildItem`, `find` |
+| Read file contents | `Read` | `cat`, `Get-Content` |
+| Edit files | `StrReplace` / `Write` | `sed`, `echo >` |
+
+Use `Shell` only for actual system commands: `git`, `uv`, `docker`, process management.
+
+---
+
+## Role of Main Chat: Orchestrator Only
+
+The main chat **never** writes code or reviews implementation.
+It only:
+1. Receives the user request
+2. Launches stage subagents via `Task` tool
+3. Presents outputs to the user
+4. Handles human checkpoints (clarifications, approvals, proposals)
+
+---
+
+## When to Apply the Full Pipeline
+
+Apply when the request:
+- Adds a new endpoint, route, or module
+- Changes an existing interface or contract
+- Touches more than 2 files
+- Requires a new dependency
+- Has ambiguous requirements
+
+**Skip to implementation directly** (без approval от пользователя) only for:
+- Single-file typo / variable rename
+- Adding a docstring or comment
+- Fixing a linter error
+
+## Pipeline Deviation Policy
+
+**Never skip or shorten the pipeline without explicit user approval.**
+
+If you believe a deviation is justified (e.g., tasks seem mechanical, scope appears small),
+you must FIRST:
+1. List which stages you propose to skip and why
+2. Wait for the user to explicitly confirm ("ok", "yes", "go ahead")
+
+Only after confirmation — proceed with the shortened flow.
+
+Skipping pipeline stages without approval is a rule violation, even if the result is correct.
+This applies to the main chat (orchestrator) and to all subagents.
+
+---
+
+## Task Decomposition — Pre-Stage 0
+
+**Before launching any pipeline**, check if the request contains multiple independent tasks.
+
+### When to decompose
+
+Decompose when the request:
+- Contains two or more features that can be implemented independently
+- Mixes concerns from different modules (e.g. search engine + UI redesign)
+- Has sub-tasks with no shared files or interfaces
+- Would produce a single massive Spec Doc covering unrelated areas
+
+### How to decompose
+
+1. Analyze the request and identify independent sub-tasks
+2. Present the breakdown to the user:
+
+```
+## Task Breakdown
+
+I see N independent tasks in your request:
+
+1. **[Task name]** — [one sentence: what and why independent]
+2. **[Task name]** — [one sentence: what and why independent]
+
+Each will run its own full pipeline (Stage 1 → 5).
+Run them sequentially or in parallel?
+
+✋ Confirm breakdown or adjust before I proceed.
+```
+
+3. Wait for user confirmation
+4. Run a **separate full pipeline** for each confirmed sub-task
+
+### When NOT to decompose
+
+- Tasks share core files or interfaces (changing one affects the other)
+- One task is a prerequisite for the other
+- The request is already a single focused feature
+
+### Example
+
+```
+❌ Bad — one pipeline for two unrelated tasks:
+   "Add semantic search engine + redesign the search results page"
+
+✅ Correct — decompose first:
+   Task 1: Add semantic search engine  → pipeline A (search module)
+   Task 2: Redesign search results page → pipeline B (presentation layer)
+```
+
+---
+
+## Pipeline Overview
+
+```
+User request
+    ↓
+[Pre-Stage 0] Task Decomposition (if multiple independent tasks)
+    ↓  present breakdown → wait for "go"
+[For each sub-task — separate pipeline:]
+    ↓
+[Stage 1 subagent] → Context Doc
+    ↓
+[Checkpoint 1] Clarifying questions if any
+    ↓
+[Stage 2 subagent] → Spec Doc
+    ↓
+[Checkpoint 2] "✋ go" to proceed
+    ↓
+[Stage 3 subagent] → Implementation Summary
+    ↓
+[Stage 4 subagent] → Review Result
+    ↓  (if FAIL → re-run Stage 3 with issues)
+[Stage 5] → Knowledge Update Proposals
+    ↓
+[Checkpoint 3] Apply proposals: "yes / no / 1 3"
+```
+
+---
+
+## Stage Handoff Formats
+
+Each stage produces a structured document passed to the next.
+
+### Context Doc (Stage 1 → Stage 2)
+
+```markdown
+# Context: {request one-liner}
+
+## Request
+{verbatim original request}
+
+## Affected files
+- `src/path/file.py` — {role, why affected}
+
+## External dependencies
+- {OpenSearch index / MongoDB collection / API}
+
+## Constraints
+- {relevant rules from .cursor/rules/}
+
+## Clarifying questions
+{list or "None"}
+```
+
+### Spec Doc (Stage 2 → Stage 3 + Stage 4)
+
+```markdown
+# Spec: {feature name}
+
+## Goal
+{one sentence}
+
+## Affected layers
+| Module | Layer | Change |
+|---|---|---|
+
+## Interfaces
+```python
+def function_name(arg: Type) -> ReturnType: ...
+```
+
+## File plan
+- CREATE `src/...` — purpose
+- MODIFY `src/...` — what changes
+
+## Acceptance criteria
+- [ ] criterion
+```
+
+### Implementation Summary (Stage 3 → Stage 4)
+
+```markdown
+# Implementation: {feature name}
+
+## Files changed
+- `src/...` — {what changed}
+
+## Spec deviations
+{any, or "None"}
+
+## Lint
+{output of `uv run ruff check .`}
+```
+
+### Review Result (Stage 4 → Stage 5)
+
+```markdown
+# Review: {feature name}
+
+## Result: ✅ PASS / ❌ FAIL
+
+## Checks
+- [ ] Satisfies original request
+- [ ] Follows .cursor/rules/
+- [ ] Matches spec (interfaces, files, acceptance criteria)
+- [ ] Lint passes
+
+## Issues (if FAIL)
+{specific issue — rule file reference}
+```
+
+---
+
+## Model Selection per Stage
+
+| Stage | Model | Reason |
+|---|---|---|
+| Stage 1 — Context | `fast` | File scanning and structuring — no deep reasoning needed |
+| Stage 2 — Architect | default | Interface design requires careful analysis |
+| Stage 3 — Implementer | default | Code quality is critical |
+| Stage 4 — Reviewer | default | Thorough verification requires full capability |
+| Stage 5 — Knowledge Update | main chat | Already in orchestrator session |
+
+When launching via `Task` tool: pass `model: "fast"` for Stage 1, omit for others (inherits default).
+
+---
+
+## Stage Instructions
+
+### Stage 1 — Context Gatherer
+
+**Subagent prompt must include:**
+- Original user request (verbatim)
+- Instruction to read `.cursor/rules/` for constraints
+- Instruction to scan codebase and produce Context Doc
+
+**Rules:**
+- No code, no solutions — only facts
+- List ALL affected files with brief descriptions
+- Extract relevant constraints from project rules
+- If anything is ambiguous — list clarifying questions
+
+---
+
+### Stage 2 — Architect
+
+**Subagent receives:** Context Doc (+ answers to clarifying questions if any)
+
+**Rules:**
+- Produce Spec Doc only — no implementation
+- Define interfaces BEFORE file plan
+- Acceptance criteria must be testable
+- End output with: `✋ Awaiting confirmation.`
+
+---
+
+### Stage 3 — Implementer
+
+**Subagent receives:** Spec Doc only
+
+**Rules:**
+- Implement exactly what the spec defines — no scope changes
+- Read only files listed in the spec file plan
+- Run `uv run ruff check . --fix` and `uv run ruff format .`
+- Produce Implementation Summary at the end
+
+---
+
+### Stage 4 — Reviewer
+
+**Subagent receives:** Spec Doc + Implementation Summary
+
+**Rules:**
+- Read only files listed in Implementation Summary
+- Check against each acceptance criterion explicitly
+- If FAIL: list exact issues with rule file references
+- Do NOT modify code
+- Produce Review Result
+
+---
+
+### Stage 5 — Knowledge Update
+
+**Runs in main chat** (needs dialogue for proposals).
+
+Answer each question explicitly:
+
+```
+[ ] 1. Was any new library, tool, or technology used?
+[ ] 2. Was any bug fixed where a root cause was identified?
+[ ] 3. Was any architectural or design decision made?
+[ ] 4. Was a new coding pattern or anti-pattern discovered?
+[ ] 5. Was any project constraint or non-negotiable clarified?
+[ ] 6. Did this workflow reveal a gap in the current rules?
+```
+
+For every "yes" — follow the `knowledge-update` skill to produce proposals.
+For all "no" — write: `No knowledge update needed — [reason].`
+
+Never apply changes without explicit confirmation.
+
+---
+
+## Failure Handling
+
+If Stage 4 returns `❌ FAIL`:
+1. Show issues to user
+2. Re-launch Stage 3 subagent with Spec Doc + Review Result (issues section)
+3. Re-run Stage 4
+4. Max 2 retry cycles — if still failing, escalate to user for manual decision
+
+---
+
+## Response Template (Orchestrator)
+
+```
+## Task Breakdown          ← (если несколько независимых задач)
+1. Task A — [why independent]
+2. Task B — [why independent]
+Run sequentially or in parallel?
+✋ Confirm breakdown.
+
+---
+[после подтверждения — для каждой задачи:]
+
+=== Task A ===
+
+Launching Stage 1...
+[Stage 1 subagent output / Context Doc]
+
+---
+Clarifying questions: {or "None — proceeding to Stage 2"}
+[wait if questions]
+
+---
+Launching Stage 2...
+[Stage 2 subagent output / Spec Doc]
+
+✋ Awaiting confirmation. Reply "go" to start implementation.
+
+---
+[after "go"]
+Launching Stage 3...
+Launching Stage 4...
+[Review Result]
+
+---
+## Stage 5 — Knowledge Update
+[checklist + proposals or "No updates needed"]
+
+=== Task B ===  ← повторить pipeline
+```

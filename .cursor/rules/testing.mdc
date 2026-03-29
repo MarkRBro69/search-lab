@@ -1,0 +1,68 @@
+---
+description: Test structure, fixture rules, and naming conventions
+globs: "tests/**/*.py"
+alwaysApply: false
+---
+
+# Testing Conventions
+
+## Structure
+
+Tests mirror `src/` layout:
+
+```
+tests/
+  unit/
+    modules/
+      search/
+        application/    ← test use cases with mocked repo
+        domain/         ← test domain logic in isolation
+      agents/
+        application/
+  integration/
+    modules/
+      search/           ← test against real OpenSearch (docker-compose)
+  e2e/                  ← full HTTP request/response via TestClient
+  conftest.py           ← shared fixtures (app, http client)
+```
+
+## Unit Tests — Rules
+
+- Mock **all** I/O: OpenSearch, LLM clients, HTTP, filesystem
+- Test **one behaviour** per test — no multi-assert mega-tests
+- No `@pytest.mark.asyncio` needed — `asyncio_mode = "auto"` is set globally
+
+```python
+# ✅ CORRECT — pure logic test with mocked repo
+async def test_execute_search_returns_empty_on_no_hits(mock_search_repo):
+    mock_search_repo.search.return_value = []
+    use_case = ExecuteSearchUseCase(repo=mock_search_repo)
+    result = await use_case.execute(SearchQuery(text="unknown"))
+    assert result.hits == []
+```
+
+## Integration Tests — Rules
+
+- Use **real OpenSearch** started via docker-compose
+- Do **not** mock LLM clients in integration tests — use a stub/fake implementation
+- Each test must clean up its index data (`yield` fixture with teardown)
+
+## Fixtures
+
+- Fixtures go in `conftest.py` at the **nearest appropriate level**
+- Do not leak fixtures across levels (unit fixtures must not be used in integration)
+- Name fixtures clearly: `mock_search_repo`, `opensearch_client`, `test_app`
+
+## Naming
+
+Pattern: `test_<what>_<condition>_<expected_outcome>`
+
+```python
+# ✅
+async def test_execute_search_with_empty_query_raises_validation_error(): ...
+async def test_opensearch_repo_returns_hits_sorted_by_score(): ...
+
+# ❌
+async def test_search(): ...
+async def test_1(): ...
+```

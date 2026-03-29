@@ -1,0 +1,70 @@
+---
+description: Project overview, stack, and global constraints for Search Lab
+alwaysApply: true
+---
+
+# Search Lab — Project Overview
+
+A FastAPI-based **evaluation platform** for comparing OpenSearch search algorithms.
+Engineers define algorithm configurations, build query libraries with ground-truth relevance
+judgements, and run N-algorithm × M-query benchmarks — measuring NDCG@K, MRR, Precision@K,
+Recall@K, latency, and score separation. Results persist in MongoDB.
+
+## Stack
+
+- Python 3.14, uv (package manager), ruff (linter/formatter)
+- FastAPI (async web framework), Pydantic v2 (schemas)
+- OpenSearch 2.x (search engine — BM25, KNN, RRF)
+- sentence-transformers (`all-MiniLM-L6-v2`, 384d) — local embedding model
+- MongoDB + Motor (async) — benchmark result storage
+- structlog (structured logging)
+- pytest + pytest-asyncio (testing)
+
+## Core Modules
+
+| Module | Role |
+|---|---|
+| `search` | Search algorithms (BM25/semantic/hybrid/RRF), indexing, per-query eval |
+| `experiments` | **Core**: Algorithm configs, QueryTemplates, N×M BenchmarkRun engine |
+| `agents` | (stub) Future LLM query enrichment |
+
+## Global Constraints
+
+- **Async-first**: all I/O (OpenSearch, MongoDB, HTTP) must be async. No blocking calls.
+- **No `Any` types**: every annotation must be explicit and specific.
+- **No magic strings**: use enums or module-level constants.
+- **No `pip install`**: always use `uv add` to manage dependencies.
+- **Pydantic v2** for all data models — use `model_validator`, `field_validator`, not v1 patterns.
+
+## Non-Negotiables
+
+```python
+# ❌ NEVER
+from typing import Any
+def handler(data: Any): ...
+import requests; requests.get(url)  # sync I/O
+
+# ✅ ALWAYS
+async def handler(data: SearchRequest) -> SearchResponse: ...
+async with httpx.AsyncClient() as client:
+    await client.get(url)
+```
+
+## Rules Map
+
+All detailed rules live in `.cursor/rules/`. Read the relevant file before editing:
+
+| Rule file | Scope | Purpose |
+|---|---|---|
+| `architecture.mdc` | always | Module structure, layer dependencies |
+| `agent-workflow.mdc` | always | 5-stage pipeline: Gatherer→Architect→Implementer→Reviewer→KnowledgeUpdate |
+| `tooling.mdc` | always | uv, ruff, pytest commands |
+| `git-conventions.mdc` | always | Conventional commits, branch naming |
+| `logging.mdc` | always | structlog usage, required fields, forbidden content |
+| `fastapi-conventions.mdc` | `**/*.py` | Routers, Pydantic v2, DI, error handling |
+| `testing.mdc` | `tests/**/*.py` | Test structure, fixtures, naming |
+| `opensearch-patterns.mdc` | `src/modules/search/infrastructure/**` | Query DSL, index naming, bulk ops |
+| `experiments-patterns.mdc` | `src/modules/experiments/**` | Algorithm/Template/BenchmarkRun patterns |
+| `llm-agent-integration.mdc` | `src/modules/agents/**` | BaseLLMClient, tool schemas, retry |
+| `communication.mdc` | always | Language (ru), shell (PowerShell), response style |
+| `local/my-profile.mdc` | always | Personal developer profile (gitignored) |

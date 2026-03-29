@@ -1,0 +1,162 @@
+---
+description: Patterns and conventions for the experiments module — Algorithm, QueryTemplate, BenchmarkRun
+globs: src/modules/experiments/**
+alwaysApply: false
+---
+
+# Experiments Module — Patterns
+
+The `experiments` module is the **core** of the evaluation platform.
+Read this file before editing any file under `src/modules/experiments/`.
+
+## Domain Aggregates
+
+Three aggregates live in `src/modules/experiments/domain/models.py`:
+
+```
+Algorithm        — named search configuration (mode, weights, filters, index)
+QueryTemplate    — reusable query + ground-truth relevant_ids
+BenchmarkRun     — result of running N algorithms × M templates
+```
+
+### Algorithm
+
+```python
+class Algorithm(BaseModel):
+    id: str                        # uuid4, auto-generated
+    name: str                      # human label, e.g. "Hybrid 30/70 no-filter"
+    mode: Literal["bm25", "semantic", "hybrid", "rrf"]
+    bm25_weight: float             # [0, 1]
+    knn_weight: float              # [0, 1]
+    num_candidates: int            # KNN candidates pool [10, 500]
+    index: str                     # "all" | "procedures" | "doctors" | "reviews"
+    filters: AlgorithmFilters      # optional domain filters
+```
+
+**Adding a new search mode:** add the literal to `Algorithm.mode` AND add the
+corresponding branch in `experiments_service.execute_benchmark` where it calls
+`search.api.search_documents`.
+
+### QueryTemplate
+
+```python
+class QueryTemplate(BaseModel):
+    id: str
+    name: str                      # short label
+    query: str                     # the search string
+    index: str                     # default index for this query
+    relevant_ids: list[str]        # ground-truth document IDs
+    notes: str                     # free-form context
+```
+
+`relevant_ids` can be empty at creation and filled later via `PUT /experiments/templates/{id}`.
+This supports a workflow where queries are created during search UI exploration, then
+relevance labels are added manually.
+
+### BenchmarkRun
+
+```python
+class BenchmarkRun(BaseModel):
+    id: str
+    k: int                         # @K used for all metrics in this run
+    algorithm_ids: list[str]
+    template_ids: list[str]
+    results: dict[str, dict[str, TemplateResult]]   # [algo_id][template_id]
+    summary: dict[str, AlgoSummary]                 # averaged per algorithm
+```
+
+`TemplateResult` contains: `ndcg_at_k`, `mrr`, `precision_at_k`, `recall_at_k`,
+`latency_ms`, `score_min/max/mean/std`, `score_separation`, `relevant_positions`.
+
+`score_separation = relevant_score_mean − non_relevant_score_mean` is the primary
+diagnostic: positive and large means the algorithm clearly pushes relevant docs above noise.
+
+## MongoDB Repository
+
+Collection names — **always use these module-level constants** (private, single leading underscore), never raw strings:
+
+```python
+_COL_ALGORITHMS = "algorithms"
+_COL_TEMPLATES = "query_templates"
+_COL_RUNS = "benchmark_runs"
+```
+
+### Domain `id` ↔ MongoDB `_id`
+
+Domain models use a string field `id`. The repository maps it to MongoDB’s `_id` so queries use the native `_id` index:
+
+- **`_to_mongo(doc)`** — takes `model.model_dump()`, moves `id` → `_id`
+- **`_from_mongo(doc)`** — after `find_one` / `find`, copies the document and sets `id` from `_id`
+
+```python
+def _to_mongo(doc: dict) -> dict:
+    d = dict(doc)
+    d["_id"] = d.pop("id")
+    return d
+
+def _from_mongo(doc: dict | None) -> dict | None:
+    if doc is None:
+        return None
+    d = dict(doc)
+    d["id"] = str(d.pop("_id"))
+    return d
+```
+
+Inserts use `_to_mongo(model.model_dump())`. Reads use `Model.model_validate(_from_mongo(doc))`. Lookups and deletes filter by `{"_id": <uuid string>}`, not `{"id": ...}`.
+
+```python
+# ✅ Correct pattern (see infrastructure/repository.py)
+async def create_algorithm(db: AsyncIOMotorDatabase, algo: Algorithm) -> Algorithm:
+    await db[_COL_ALGORITHMS].insert_one(_to_mongo(algo.model_dump()))
+    return algo
+
+async def get_algorithm(db: AsyncIOMotorDatabase, algo_id: str) -> Algorithm | None:
+    doc = await db[_COL_ALGORITHMS].find_one({"_id": algo_id})
+    return Algorithm.model_validate(_from_mongo(doc)) if doc else None
+```
+
+## Service Layer
+
+`experiments_service.execute_benchmark` runs the N×M matrix **concurrently**:
+
+```python
+tasks = [
+    _run_single(os_client, algo, template, k)
+    for algo in algorithms
+    for template in templates
+]
+results = await asyncio.gather(*tasks)
+```
+
+Each `_run_single` call:
+1. Builds `SearchParams` from the `Algorithm` config
+2. Calls `search_service.search(client, params)` — goes through `src/modules/search/api.py`
+3. Computes `TemplateResult` metrics locally (no OpenSearch `_rank_eval` for flexibility)
+4. Records `latency_ms` with `time.perf_counter()`
+
+**Do NOT** call `search` module internals directly — only through `src/modules/search/api.py`.
+
+## Adding New Metrics to TemplateResult
+
+1. Add the field to `TemplateResult` in `domain/models.py`
+2. Compute the value in `experiments_service._run_single`
+3. Add the field to `AlgoSummary` and average it in `_build_summary`
+4. No router changes needed — `BenchmarkRun` is returned verbatim
+
+## Presentation Layer
+
+All request/response schemas are defined inline in `presentation/router.py` (not in a separate
+`schemas.py`) because the domain models (`Algorithm`, `QueryTemplate`, `BenchmarkRun`) are used
+directly as response models. Only input shapes (`AlgorithmCreate`, `TemplateCreate`, etc.)
+need dedicated Pydantic models.
+
+## Logging
+
+Every benchmark run must log start and completion:
+
+```python
+log = logger.bind(module="experiments", operation="execute_benchmark")
+log.info("benchmark_started", num_algorithms=len(algorithms), num_templates=len(templates), k=k)
+# ...
+log.info("benchmark_completed", run_id=run.id, latency_ms=elapsed)
+```

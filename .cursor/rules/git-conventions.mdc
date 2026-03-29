@@ -1,0 +1,77 @@
+---
+description: Git commit format, branch naming, and commit hygiene
+alwaysApply: true
+---
+
+# Git Conventions
+
+## Commit Format — Conventional Commits
+
+```
+<type>(<scope>): <short description>
+
+[optional body]
+```
+
+Types:
+- `feat` — new feature
+- `fix` — bug fix
+- `refactor` — code change with no feature/fix
+- `test` — adding or updating tests
+- `docs` — documentation only
+- `chore` — tooling, deps, config
+
+Examples:
+```
+feat(search): add semantic reranking to query pipeline
+fix(agents): handle LLM timeout with retry backoff
+refactor(search): extract query builder to separate class
+test(search): add integration tests for opensearch repository
+docs: add ADR for modular monolith decision
+chore: upgrade opensearch-py to 2.7
+```
+
+## Branch Naming
+
+```
+feat/<short-slug>      # feat/semantic-reranking
+fix/<short-slug>       # fix/llm-timeout
+chore/<short-slug>     # chore/upgrade-opensearch
+```
+
+## Commit Hygiene
+
+- One logical change per commit — no "fix everything" commits
+- pre-commit hooks enforce automatically on every `git commit`:
+  1. `ruff check --fix` — lint
+  2. `ruff format` — formatting
+  3. `pytest tests/unit/ -q` — unit tests must pass
+  4. commit-msg check — forbidden AI tool names
+
+To install hooks after cloning:
+```powershell
+uv run pre-commit install
+```
+
+## Commit Message — Forbidden Words
+
+**Never mention AI tool or model names** in commit messages.
+Write "agent" when referring to AI-assisted work.
+
+```
+# ❌ FORBIDDEN in commit messages:
+# Cursor, Claude, ChatGPT, GPT-4, Copilot, OpenAI, Anthropic, Gemini, Mistral
+
+# ✅ CORRECT — generic "agent"
+refactor(search): fix module boundary violation found by agent
+docs: update rules based on agent audit recommendations
+```
+
+The `no-ai-tool-names` pre-commit hook will reject commits containing these words.
+
+## Never Commit
+
+- `.env` files (real credentials)
+- `uv.lock` changes without corresponding `pyproject.toml` dependency changes
+- Generated files or build artifacts
+- `.cursor/rules/local/*.mdc` (personal developer profiles)

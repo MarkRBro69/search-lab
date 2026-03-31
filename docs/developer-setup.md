@@ -1,72 +1,70 @@
-# Настройка окружения разработчика
+# Developer Setup
 
-**Search Lab** — платформа для тестирования поисковых алгоритмов на OpenSearch.
-Это руководство поможет тебе запустить проект локально и персонализировать поведение LLM-агентов.
+**Search Lab** is a platform for testing search algorithms on OpenSearch.
+This guide walks you through running the project locally and customising LLM-agent behaviour.
 
-## Требования
+## Requirements
 
 - Python 3.14+
-- [uv](https://docs.astral.sh/uv/getting-started/installation/) — установи глобально
-- Docker Desktop (или Docker Engine + docker-compose)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) — install globally
+- Docker Desktop (or Docker Engine + docker-compose)
 - Cursor IDE
 
-## Установка проекта
+## Installation
 
 ```powershell
-# 1. Клонировать репозиторий
+# 1. Clone the repository
 git clone <repo-url>
 cd new_search
 
-# 2. Установить зависимости (uv создаёт .venv автоматически)
+# 2. Install dependencies (uv creates .venv automatically)
 uv sync --all-extras
 
-# 3. Установить pre-commit хуки
+# 3. Install pre-commit hooks
 uv run pre-commit install
 
-# 4. Скопировать файл окружения
+# 4. Copy the environment file
 Copy-Item .env.example .env
-# Открыть .env и заполнить нужные значения
+# Open .env and fill in the required values
 ```
 
-## Запуск инфраструктуры
+## Starting the Infrastructure
 
 ```powershell
-# Минимум для работы (OpenSearch + MongoDB нужны оба)
+# Minimum required (OpenSearch + MongoDB are both needed)
 docker-compose up -d opensearch mongodb
 
-# Полный стек (+ Dashboards + приложение в контейнере)
+# Full stack (+ Dashboards + app in a container)
 docker-compose up -d
 
-# Проверить статус
+# Check status
 docker-compose ps
 ```
 
-## Запуск приложения
+## Running the Application
 
 ```powershell
-make dev
-# или
 uv run uvicorn src.main:app --reload
 ```
 
-Приложение будет доступно на `http://localhost:8000`.
+The app will be available at `http://localhost:8000`.
 Swagger UI: `http://localhost:8000/docs`.
 
 ---
 
-## Персональный профиль агента
+## Personal Agent Profile
 
-Каждый разработчик может настроить поведение LLM-агентов под себя: язык общения, синтаксис команд, уровень подтверждений.
+Each developer can customise LLM-agent behaviour: communication language, terminal syntax, confirmation level.
 
-### Как создать профиль
+### How to create a profile
 
-**Шаг 1.** Скопируй шаблон:
+**Step 1.** Copy the template:
 
 ```powershell
 Copy-Item .cursor\templates\developer-profile.mdc .cursor\rules\local\my-profile.mdc
 ```
 
-**Шаг 2.** Открой `.cursor/rules/local/my-profile.mdc` и заполни поля:
+**Step 2.** Open `.cursor/rules/local/my-profile.mdc` and fill in the fields:
 
 ```markdown
 ---
@@ -78,33 +76,33 @@ alwaysApply: true
 
 - OS: windows
 - Shell: powershell
-- Communication language: ru
+- Communication language: en
 - Terminal command style: always use PowerShell syntax in suggestions
 - Confirmation: yes
 - Verbosity: concise
 ```
 
-**Шаг 3.** Сохрани файл. Cursor подхватит его автоматически в следующей сессии.
+**Step 3.** Save the file. Cursor will pick it up automatically in the next session.
 
-> Файл гитигнорируется — в репозиторий не попадёт.
+> This file is gitignored and will not be committed to the repository.
 
-### Описание полей
+### Field reference
 
-| Поле | Значения | Эффект |
+| Field | Values | Effect |
 |---|---|---|
-| `OS` | `windows`, `macos`, `linux` | Агент знает особенности платформы |
-| `Shell` | `powershell`, `bash`, `zsh` | Все команды в терминале — в нужном синтаксисе |
-| `Communication language` | `ru`, `en` | Язык ответов, комментариев, коммитов |
-| `Confirmation` | `yes`, `no` | Спрашивать ли подтверждение перед многошаговыми планами |
-| `Verbosity` | `concise`, `detailed` | Краткие или развёрнутые объяснения |
+| `OS` | `windows`, `macos`, `linux` | Agent is aware of platform specifics |
+| `Shell` | `powershell`, `bash`, `zsh` | All terminal commands use the right syntax |
+| `Communication language` | `ru`, `en` | Language for responses, comments, commit messages |
+| `Confirmation` | `yes`, `no` | Whether to ask for confirmation before multi-step plans |
+| `Verbosity` | `concise`, `detailed` | Short or detailed explanations |
 
-### Примеры
+### Examples
 
-**Windows / PowerShell / Русский:**
+**Windows / PowerShell / English:**
 ```markdown
 - OS: windows
 - Shell: powershell
-- Communication language: ru
+- Communication language: en
 - Terminal command style: always use PowerShell syntax
 - Confirmation: yes
 - Verbosity: concise
@@ -122,20 +120,20 @@ alwaysApply: true
 
 ---
 
-## Структура правил агентов
+## Agent Rules Structure
 
-Все правила в `.cursor/rules/` автоматически применяются агентами:
+All rules in `.cursor/rules/` are applied automatically by agents:
 
-| Файл | Когда применяется |
+| File | When applied |
 |---|---|
-| `project-overview.mdc` | Всегда |
-| `architecture.mdc` | Всегда |
-| `agent-workflow.mdc` | Всегда |
-| `tooling.mdc` | Всегда |
-| `git-conventions.mdc` | Всегда |
-| `logging.mdc` | Всегда |
-| `fastapi-conventions.mdc` | При работе с `.py` файлами |
-| `testing.mdc` | При работе с `tests/` |
-| `opensearch-patterns.mdc` | При работе с `src/modules/search/infrastructure/` |
-| `llm-agent-integration.mdc` | При работе с `src/modules/agents/` |
-| `local/my-profile.mdc` | Всегда (личный, гитигнорируется) |
+| `project-overview.mdc` | Always |
+| `architecture.mdc` | Always |
+| `agent-workflow.mdc` | Always |
+| `tooling.mdc` | Always |
+| `git-conventions.mdc` | Always |
+| `logging.mdc` | Always |
+| `fastapi-conventions.mdc` | When working with `.py` files |
+| `testing.mdc` | When working with `tests/` |
+| `opensearch-patterns.mdc` | When working with `src/modules/search/infrastructure/` |
+| `llm-agent-integration.mdc` | When working with `src/modules/agents/` |
+| `local/my-profile.mdc` | Always (personal, gitignored) |

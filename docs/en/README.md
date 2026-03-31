@@ -20,7 +20,3 @@ Researchers, search engineers, and anyone who needs to compare **BM25**, **seman
 - [Developer setup](../developer-setup.md) — full local install, tooling, agent profiles
 - **OpenAPI / Swagger** — when the app is running: `http://localhost:8000/docs` (adjust host/port as needed)
 - [Architecture decisions](../decisions/) — ADRs and design notes for contributors
-
-## Language
-
-This guide is in English. A Russian version is available: [Руководство пользователя (RU)](../ru/README.md).

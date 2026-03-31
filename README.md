@@ -6,6 +6,5 @@ Use the web UI for day-to-day search and experiments, or call the HTTP API under
 
 ## Documentation
 
-- **User documentation (EN):** [docs/en/README.md](docs/en/README.md)
-- **Пользовательская документация (RU):** [docs/ru/README.md](docs/ru/README.md)
+- **User documentation:** [docs/en/README.md](docs/en/README.md)
 - **Developer setup:** [docs/developer-setup.md](docs/developer-setup.md)

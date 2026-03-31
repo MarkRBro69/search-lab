@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 import structlog
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -25,6 +26,7 @@ from src.shared.infrastructure.logging import configure_logging
 from src.shared.infrastructure.mongodb import close_client as close_mongo
 from src.shared.infrastructure.mongodb import get_db
 
+load_dotenv()
 configure_logging()
 
 if TYPE_CHECKING:

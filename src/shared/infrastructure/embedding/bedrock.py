@@ -18,6 +18,8 @@ async def embed_bedrock(text: str, config: EmbeddingConfig) -> list[float]:
         if config.aws_access_key_id and config.aws_secret_access_key:
             kwargs["aws_access_key_id"] = config.aws_access_key_id
             kwargs["aws_secret_access_key"] = config.aws_secret_access_key
+            if config.aws_session_token:
+                kwargs["aws_session_token"] = config.aws_session_token
         client = boto3.client("bedrock-runtime", **kwargs)
         body = json.dumps({"inputText": text})
         response = client.invoke_model(modelId=config.model_name, body=body)

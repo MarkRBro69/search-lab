@@ -1042,12 +1042,14 @@
     document.getElementById('pc_aws_region').value = '';
     document.getElementById('pc_aws_access_key_id').value = '';
     document.getElementById('pc_aws_secret_access_key').value = '';
+    document.getElementById('pc_aws_session_token').value = '';
     document.getElementById('pc_embed_provider').value = 'local_sentence_transformers';
     document.getElementById('pc_model_name').value = 'all-MiniLM-L6-v2';
     document.getElementById('pc_bedrock_model_name').value = '';
     document.getElementById('pc_embed_aws_region').value = '';
     document.getElementById('pc_embed_aws_access_key_id').value = '';
     document.getElementById('pc_embed_aws_secret_access_key').value = '';
+    document.getElementById('pc_embed_aws_session_token').value = '';
     const idxList = document.getElementById('pc_indices_list');
     if (idxList) { idxList.innerHTML = ''; addIndexRow('pc'); }
     syncProfileAuthVisibility('pc');
@@ -1106,6 +1108,7 @@
       aws_region: null,
       aws_access_key_id: null,
       aws_secret_access_key: null,
+      aws_session_token: null,
     };
     if (auth === 'basic') {
       base.username = gid(prefix === 'pc' ? 'pc_username' : profileEditFieldId(prefix, 'username')) || null;
@@ -1118,6 +1121,8 @@
       base.aws_secret_access_key =
         gid(prefix === 'pc' ? 'pc_aws_secret_access_key' : profileEditFieldId(prefix, 'aws_secret_access_key')) ||
         null;
+      base.aws_session_token =
+        gid(prefix === 'pc' ? 'pc_aws_session_token' : profileEditFieldId(prefix, 'aws_session_token')) || null;
     }
     return base;
   }
@@ -1136,6 +1141,7 @@
       aws_region: null,
       aws_access_key_id: null,
       aws_secret_access_key: null,
+      aws_session_token: null,
     };
     if (prov === 'local_sentence_transformers') {
       emb.model_name =
@@ -1151,6 +1157,9 @@
         null;
       emb.aws_secret_access_key =
         gid(prefix === 'pc' ? 'pc_embed_aws_secret_access_key' : profileEditFieldId(prefix, 'embed_aws_secret_access_key')) ||
+        null;
+      emb.aws_session_token =
+        gid(prefix === 'pc' ? 'pc_embed_aws_session_token' : profileEditFieldId(prefix, 'embed_aws_session_token')) ||
         null;
     }
     return emb;
@@ -1249,6 +1258,7 @@
             <div class="form-row" style="margin:0"><label>Access Key ID</label><input id="${id('aws_access_key_id')}" class="form-input" value="${esc(os.aws_access_key_id)}" autocomplete="off" /></div>
             <div class="form-row" style="margin:0"><label>Secret Access Key</label><input id="${id('aws_secret_access_key')}" class="form-input" type="password" placeholder="(unchanged if empty)" autocomplete="new-password" /></div>
           </div>
+          <div class="form-row"><label>Session Token</label><input id="${id('aws_session_token')}" class="form-input" type="password" placeholder="Required for temporary (STS) credentials" autocomplete="new-password" /></div>
         </div>
         <h3 style="margin-top:12px;">Embedding</h3>
         <div class="form-row"><label>Provider</label>
@@ -1267,6 +1277,7 @@
             <div class="form-row" style="margin:0"><label>Access Key ID</label><input id="${id('embed_aws_access_key_id')}" class="form-input" value="${esc(emb.aws_access_key_id)}" autocomplete="off" /></div>
             <div class="form-row" style="margin:0"><label>Secret Access Key</label><input id="${id('embed_aws_secret_access_key')}" class="form-input" type="password" placeholder="(unchanged if empty)" autocomplete="new-password" /></div>
           </div>
+          <div class="form-row"><label>Session Token</label><input id="${id('embed_aws_session_token')}" class="form-input" type="password" placeholder="Required for temporary (STS) credentials" autocomplete="new-password" /></div>
         </div>
         <h3 style="margin-top:12px;">Indices</h3>
         <div class="indices-header"><span>Logical key</span><span>Physical index name</span><span>BM25 fields (comma-sep)</span><span></span></div>

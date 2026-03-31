@@ -27,6 +27,7 @@ def _aws_sigv4_auth(config: OpenSearchConfig) -> AWS4Auth:
             config.aws_secret_access_key,
             region,
             service,
+            session_token=config.aws_session_token,
         )
     session = boto3.Session(region_name=region)
     creds = session.get_credentials()

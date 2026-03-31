@@ -1,0 +1,66 @@
+---
+description: Score normalization contract — all search modes must return scores in [0, 1]
+alwaysApply: true
+---
+
+# Score Normalization — Fundamental Rule
+
+## Contract
+
+**All search modes must return `hit["score"]` in the range [0, 1].**
+
+This is a non-negotiable requirement so that Score Mean and Score Separation
+in benchmark results are comparable across algorithms.
+
+| Mode | Normalization | Mechanism |
+|------|--------------|-----------|
+| BM25 | ✅ min-max | `_minmax(hits)` after `_parse_hits` |
+| Semantic | ✅ min-max | `_minmax(hits)` after `_parse_hits` |
+| Hybrid | ✅ min-max | `_minmax(hits)` after `_hybrid_combine` |
+| RRF | ✅ min-max | `_minmax(hits)` after `_rrf_combine` |
+
+## Where to enforce
+
+`src/modules/search/application/search_service.py` — the `search()` function.
+`_minmax(hits)` **must** be called after forming the final `hits` list in **every** branch:
+
+```python
+# ✅ CORRECT — all four branches call _minmax before return
+if params.mode == SearchMode.BM25:
+    total, hits = _parse_hits(raw)
+    _minmax(hits)                    # normalize
+
+elif params.mode == SearchMode.SEMANTIC:
+    total, hits = _parse_hits(raw)
+    _minmax(hits)                    # normalize
+
+elif params.mode == SearchMode.HYBRID:
+    hits = _hybrid_combine(...)
+    _minmax(hits)                    # normalize
+
+elif params.mode == SearchMode.RRF:
+    hits = _rrf_combine(...)
+    _minmax(hits)                    # normalize
+
+# ❌ WRONG — adding a new search mode without _minmax
+elif params.mode == SearchMode.NEW_MODE:
+    hits = some_combine(...)
+    # missing _minmax — scores will be in unknown range, Sep/Mean not comparable
+```
+
+## Why this matters
+
+Without normalization:
+- **Semantic** returns raw KNN scores (space_type dependent, e.g. `[0, 2]` for cosinesimil)
+- **RRF** returns `1/(60+rank)` values in `[0, ~0.033]`
+- These make `avg_score_mean` and `avg_score_separation` in benchmarks **meaningless for comparison**
+
+After normalization: Score Mean and Sep are in [0, 1] for all algorithms — green/red
+coloring in the benchmark table correctly identifies the best-performing algorithm.
+
+## Checklist when adding a new search mode
+
+- [ ] New mode added to `SearchMode` enum
+- [ ] New branch in `search()` calls `_minmax(hits)` before returning
+- [ ] Unit test verifies all `hit["score"]` ∈ [0, 1] for the new mode
+- [ ] `SearchHit.score` description in `schemas.py` remains accurate

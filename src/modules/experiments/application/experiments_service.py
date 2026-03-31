@@ -106,8 +106,21 @@ def _compute_result(
     # Separation: relevant vs non-relevant scores
     rel_scores = [h["score"] for h in hits if h["id"] in relevant]
     non_rel_scores = [h["score"] for h in hits if h["id"] not in relevant]
-    rel_mean = sum(rel_scores) / len(rel_scores) if rel_scores else 0.0
-    non_rel_mean = sum(non_rel_scores) / len(non_rel_scores) if non_rel_scores else 0.0
+
+    if rel_scores:
+        rel_mean = sum(rel_scores) / len(rel_scores)
+        non_rel_mean = sum(non_rel_scores) / len(non_rel_scores) if non_rel_scores else 0.0
+        relevant_score_mean: float | None = round(rel_mean, 4)
+        non_relevant_score_mean: float | None = round(non_rel_mean, 4)
+        score_separation: float | None = round(rel_mean - non_rel_mean, 4)
+    else:
+        relevant_score_mean = None
+        score_separation = None
+        if hits:
+            all_mean = sum(h["score"] for h in hits) / len(hits)
+            non_relevant_score_mean = round(all_mean, 4)
+        else:
+            non_relevant_score_mean = None
 
     # Positions (1-based)
     rel_positions = [i + 1 for i, h in enumerate(hits) if h["id"] in relevant]
@@ -123,9 +136,9 @@ def _compute_result(
         score_max=round(s_max, 4),
         score_mean=round(s_mean, 4),
         score_std=round(s_std, 4),
-        relevant_score_mean=round(rel_mean, 4),
-        non_relevant_score_mean=round(non_rel_mean, 4),
-        score_separation=round(rel_mean - non_rel_mean, 4),
+        relevant_score_mean=relevant_score_mean,
+        non_relevant_score_mean=non_relevant_score_mean,
+        score_separation=score_separation,
         first_relevant_position=first_pos,
         relevant_positions=rel_positions,
         total_hits=len(hits),
@@ -140,13 +153,16 @@ def _summarise(template_results: dict[str, TemplateResult]) -> AlgoSummary:
     def avg(attr: str) -> float:
         return round(sum(getattr(tr, attr) for tr in trs) / n, 4)
 
+    seps = [tr.score_separation for tr in trs if tr.score_separation is not None]
+    avg_sep: float | None = round(sum(seps) / len(seps), 4) if seps else None
+
     return AlgoSummary(
         avg_ndcg_at_k=avg("ndcg_at_k"),
         avg_mrr=avg("mrr"),
         avg_precision_at_k=avg("precision_at_k"),
         avg_recall_at_k=avg("recall_at_k"),
         avg_latency_ms=avg("latency_ms"),
-        avg_score_separation=avg("score_separation"),
+        avg_score_separation=avg_sep,
         avg_score_mean=avg("score_mean"),
     )
 
@@ -210,6 +226,24 @@ async def run_benchmark(
         results[algo_id][tmpl_id] = tr
 
     summary = {algo_id: _summarise(trs) for algo_id, trs in results.items()}
+
+    latencies = [s.avg_latency_ms for s in summary.values()]
+    min_lat = min(latencies) if latencies else 0.0
+    max_lat = max(latencies) if latencies else 0.0
+    lat_range = max_lat - min_lat
+
+    for s in summary.values():
+        lat_norm = 1.0 - (s.avg_latency_ms - min_lat) / lat_range if lat_range > 0 else 1.0
+        metrics: list[float] = [
+            s.avg_ndcg_at_k,
+            s.avg_mrr,
+            s.avg_precision_at_k,
+            s.avg_recall_at_k,
+            lat_norm,
+        ]
+        if s.avg_score_separation is not None:
+            metrics.append(max(0.0, s.avg_score_separation))
+        s.composite_score = round(sum(metrics) / len(metrics), 4)
 
     return BenchmarkRun(
         name=name,

@@ -96,35 +96,22 @@ def _hybrid_combine(
     bm25_map: dict[str, dict[str, object]] = {str(h["id"]): h for h in bm25_hits}
     knn_map: dict[str, dict[str, object]] = {str(h["id"]): h for h in knn_hits}
 
-    bm25_scores = {
-        str(h["id"]): float(h["score"])
-        for h in bm25_hits
-        if isinstance(h.get("score"), (int, float))
-    }
-    knn_scores = {
-        str(h["id"]): float(h["score"])
-        for h in knn_hits
-        if isinstance(h.get("score"), (int, float))
-    }
-
-    def _norm(scores: dict[str, float]) -> dict[str, float]:
-        if not scores:
-            return {}
-        lo, hi = min(scores.values()), max(scores.values())
-        if hi == lo:
-            return {k: 1.0 for k in scores}
-        return {k: (v - lo) / (hi - lo) for k, v in scores.items()}
-
-    bm25_norm = _norm(bm25_scores)
-    knn_norm = _norm(knn_scores)
+    bm25_rank: dict[str, int] = {str(h["id"]): i + 1 for i, h in enumerate(bm25_hits)}
+    knn_rank: dict[str, int] = {str(h["id"]): i + 1 for i, h in enumerate(knn_hits)}
+    bm25_miss = len(bm25_hits) + 1
+    knn_miss = len(knn_hits) + 1
+    n_bm25 = len(bm25_hits) if bm25_hits else 1
+    n_knn = len(knn_hits) if knn_hits else 1
 
     all_ids = set(bm25_map) | set(knn_map)
     docs: list[dict[str, object]] = []
 
     for doc_id in all_ids:
-        b_n = bm25_norm.get(doc_id, 0.0)
-        k_n = knn_norm.get(doc_id, 0.0)
-        combined = params.bm25_weight * b_n + params.knn_weight * k_n
+        r_b = bm25_rank.get(doc_id, bm25_miss)
+        r_k = knn_rank.get(doc_id, knn_miss)
+        b_rs = (n_bm25 - r_b + 1) / n_bm25
+        k_rs = (n_knn - r_k + 1) / n_knn
+        combined = params.bm25_weight * b_rs + params.knn_weight * k_rs
 
         source_hit = bm25_map.get(doc_id) or knn_map.get(doc_id)
         assert source_hit is not None
@@ -136,12 +123,12 @@ def _hybrid_combine(
         }
         if params.explain:
             doc["score_breakdown"] = {
-                "bm25_raw": round(bm25_scores.get(doc_id, 0.0), 4),
-                "bm25_normalized": round(b_n, 4),
-                "knn_cosine": round(knn_scores.get(doc_id, 0.0), 4),
-                "knn_normalized": round(k_n, 4),
-                "bm25_contribution": round(params.bm25_weight * b_n, 4),
-                "knn_contribution": round(params.knn_weight * k_n, 4),
+                "bm25_rank": r_b,
+                "knn_rank": r_k,
+                "bm25_rank_score": round(b_rs, 4),
+                "knn_rank_score": round(k_rs, 4),
+                "bm25_contribution": round(params.bm25_weight * b_rs, 4),
+                "knn_contribution": round(params.knn_weight * k_rs, 4),
             }
         docs.append(doc)
 
@@ -240,6 +227,7 @@ async def search(
             None, partial(search_knn, client, vector, params, index_alias)
         )
         total, hits = _parse_hits(raw)
+        _minmax(hits)
 
     elif params.mode == SearchMode.HYBRID:
         vector = await embed(params.q)
@@ -253,6 +241,7 @@ async def search(
             ),
         )
         hits = _hybrid_combine(bm25_hits, knn_hits, params)
+        _minmax(hits)
         total = len(set(h["id"] for h in bm25_hits) | set(h["id"] for h in knn_hits))
 
     elif params.mode == SearchMode.RRF:
@@ -267,6 +256,7 @@ async def search(
             ),
         )
         hits = _rrf_combine(bm25_hits, knn_hits, params)
+        _minmax(hits)
         total = len(set(h["id"] for h in bm25_hits) | set(h["id"] for h in knn_hits))
 
     else:

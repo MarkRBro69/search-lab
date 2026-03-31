@@ -90,6 +90,7 @@ All coding rules are in `.cursor/rules/`. Read the relevant file before editing:
 | `fastapi-conventions.mdc` | `**/*.py` | Routers, Pydantic, error handling |
 | `testing.mdc` | `tests/**/*.py` | Test structure, fixtures, naming |
 | `opensearch-patterns.mdc` | `src/modules/search/infrastructure/**` | Query DSL, index naming |
+| `score-normalization.mdc` | always | Score contract [0,1] for all modes; benchmark comparability |
 | `experiments-patterns.mdc` | `src/modules/experiments/**` | Algorithm/Template/BenchmarkRun patterns |
 | `llm-agent-integration.mdc` | `src/modules/agents/**` | LLM client patterns, tool schemas |
 
@@ -119,6 +120,7 @@ The following personal skills are active for all projects and apply here:
 - **No magic strings** — use enums or constants
 - **No `pip install`** — always use `uv add`
 - **Error schema**: 4xx responses → `{"detail": str, "code": str}` via domain exceptions in `src/shared/exceptions.py`; 500 → `{"detail": "Internal server error"}` only; OpenSearch/MongoDB failures → 503 with sanitized fixed message
+- **Score normalization (non-negotiable)**: `hit["score"]` from `search()` MUST be in [0, 1] for ALL search modes (BM25, semantic, hybrid, RRF). Achieved via `_minmax(hits)` in `search_service.py` after forming the final hits list in each branch. Without this, `avg_score_mean` and `avg_score_separation` in benchmark results are not comparable across algorithms. Every new search mode MUST call `_minmax(hits)`. See `.cursor/rules/score-normalization.mdc` for details.
 - Secrets and PII must **never** appear in logs
 - Connection profile secrets (password, AWS keys) are **never** returned by API responses — UI must re-submit credentials on edit
 - `ProfileIndices` uses arbitrary `dict[str,str]` for index names — no hardcoded domain keys (`procedures`/`doctors`/`reviews`)

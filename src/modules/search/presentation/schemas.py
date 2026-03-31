@@ -37,19 +37,31 @@ OsExplanationNode.model_rebuild()
 class ScoreBreakdown(BaseModel):
     """Per-document score breakdown when explain=true (hybrid / rrf modes)."""
 
-    # Hybrid mode
-    bm25_raw: float | None = Field(None, description="Raw BM25 score before normalization")
+    # Hybrid mode (rank-based pool normalization)
+    bm25_raw: float | None = Field(None, description="Raw BM25 score (legacy; hybrid uses ranks)")
     bm25_normalized: float | None = Field(
-        None, description="BM25 score after min-max normalization [0, 1]"
+        None, description="BM25 after min-max (BM25-only); hybrid uses bm25_rank_score"
     )
-    bm25_contribution: float | None = Field(None, description="bm25_weight × bm25_normalized")
+    bm25_contribution: float | None = Field(
+        None, description="bm25_weight × bm25_normalized or × bm25_rank_score (hybrid)"
+    )
     knn_cosine: float | None = Field(None, description="Raw KNN cosine similarity [0, 1]")
     knn_normalized: float | None = Field(
-        None, description="KNN score after min-max normalization [0, 1]"
+        None, description="KNN after min-max (semantic-only); hybrid uses knn_rank_score"
     )
-    knn_contribution: float | None = Field(None, description="knn_weight × knn_normalized")
+    knn_contribution: float | None = Field(
+        None, description="knn_weight × knn_normalized or × knn_rank_score (hybrid)"
+    )
+    bm25_rank_score: float | None = Field(
+        None,
+        description="Hybrid: (pool_size − rank + 1) / pool_size from BM25 candidate list",
+    )
+    knn_rank_score: float | None = Field(
+        None,
+        description="Hybrid: (pool_size − rank + 1) / pool_size from KNN candidate list",
+    )
 
-    # RRF mode
+    # RRF mode (and hybrid rank positions)
     bm25_rank: int | None = Field(None, description="Position of the document in BM25 results")
     knn_rank: int | None = Field(None, description="Position of the document in KNN results")
     rrf_bm25: float | None = Field(None, description="1 / (rrf_k + bm25_rank)")
@@ -61,7 +73,11 @@ class SearchHit(BaseModel):
     id: str = Field(..., description="Document UUID")
     index: str = Field(..., description="OpenSearch index name")
     score: float = Field(
-        ..., description="Relevance score [0, 1] for bm25/hybrid/rrf; cosine for semantic"
+        ...,
+        description=(
+            "Relevance score in [0, 1]. Min-max normalised within the returned result set "
+            "for all search modes (BM25, semantic, hybrid, RRF)."
+        ),
     )
     source: dict[str, DocumentField] = Field(..., description="Document fields")
     score_breakdown: ScoreBreakdown | None = Field(

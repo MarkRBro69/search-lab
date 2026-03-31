@@ -102,15 +102,23 @@ class TemplateResult(BaseModel):
     score_std: float = Field(description="Standard deviation of scores — spread of the ranking")
 
     # ── Separation quality (key diagnostic) ───────────────────────────────
-    relevant_score_mean: float = Field(
-        description="Average score of hits that appear in relevant_ids"
+    relevant_score_mean: float | None = Field(
+        default=None,
+        description="Average score of hits in relevant_ids; null when no relevant hit in the list",
     )
-    non_relevant_score_mean: float = Field(description="Average score of hits NOT in relevant_ids")
-    score_separation: float = Field(
+    non_relevant_score_mean: float | None = Field(
+        default=None,
         description=(
-            "relevant_score_mean − non_relevant_score_mean. "
-            "Higher = algorithm pushes relevant docs further above non-relevant ones."
-        )
+            "When no relevant hit in the list: mean score over all hits (if any). "
+            "Otherwise: mean score of hits not in relevant_ids."
+        ),
+    )
+    score_separation: float | None = Field(
+        default=None,
+        description=(
+            "relevant_score_mean − non_relevant_score_mean when both sides are defined; "
+            "null when there is no relevant hit to compare (avoids misleading averages)."
+        ),
     )
 
     # ── Ranking positions ─────────────────────────────────────────────────
@@ -131,8 +139,9 @@ class AlgoSummary(BaseModel):
     avg_precision_at_k: float
     avg_recall_at_k: float
     avg_latency_ms: float
-    avg_score_separation: float
+    avg_score_separation: float | None
     avg_score_mean: float
+    composite_score: float | None = None
 
 
 class BenchmarkRun(BaseModel):

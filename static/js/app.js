@@ -425,7 +425,34 @@
       </div>`;
     }
 
-    // Hybrid breakdown with bars
+    // Hybrid: rank-based normalization (per-pool rank scores) or legacy min-max fields
+    const hasRankScores = bd.bm25_rank_score != null || bd.knn_rank_score != null;
+    if (hasRankScores) {
+      const bm25rs = Number(bd.bm25_rank_score ?? 0);
+      const knnrs = Number(bd.knn_rank_score ?? 0);
+      const comb = (bd.bm25_contribution ?? 0) + (bd.knn_contribution ?? 0);
+      return `<div class="breakdown">
+        <div class="breakdown-title">Score Breakdown (explain)</div>
+        <div class="breakdown-bars">
+          <div class="bk-row">
+            <div class="bk-label">BM25 rank → score</div>
+            <div class="bk-bar-wrap"><div class="bk-bar bk-bm25" style="width:${bm25rs*100}%"></div></div>
+            <div class="bk-val">#${bd.bm25_rank ?? '—'} → ${bm25rs.toFixed(3)}</div>
+          </div>
+          <div class="bk-row">
+            <div class="bk-label">KNN rank → score</div>
+            <div class="bk-bar-wrap"><div class="bk-bar bk-knn" style="width:${knnrs*100}%"></div></div>
+            <div class="bk-val">#${bd.knn_rank ?? '—'} → ${knnrs.toFixed(3)}</div>
+          </div>
+          <div class="bk-row">
+            <div class="bk-label">Combined score</div>
+            <div class="bk-bar-wrap"><div class="bk-bar bk-combined" style="width:${comb*100}%"></div></div>
+            <div class="bk-val">${comb.toFixed(3)}</div>
+          </div>
+        </div>
+      </div>`;
+    }
+
     const bm25n = bd.bm25_normalized ?? 0;
     const knnn  = bd.knn_normalized  ?? bd.knn_cosine ?? 0;
     const comb  = (bd.bm25_contribution ?? 0) + (bd.knn_contribution ?? 0);
@@ -466,9 +493,7 @@
     const sourceUrl = cardSourceUrl(s);
     const jsonHtml = renderJsonHighlight(s);
 
-    const scoreBadge = sc > 1
-      ? `<span class="score-badge">${sc.toFixed(2)}</span>`
-      : `<span class="score-badge">${sc.toFixed(4)}</span>`;
+    const scoreBadge = `<span class="score-badge">${sc.toFixed(4)}</span>`;
 
     const breakdownHtml = (explain && hit.score_breakdown) ? renderBreakdown(hit.score_breakdown, mode) : '';
     const relevantBadge = isRelevant ? `<div class="rank-badge">#${position + 1}</div>` : '';
@@ -882,9 +907,9 @@
       { key: 'avg_mrr',              label: 'MRR',          isLatency: false, tooltip: 'Mean Reciprocal Rank\nReciprocal of the position of the first relevant document.\nExample: first relevant at position 3 → score = 1/3.\nRange: 0–1, higher is better.' },
       { key: 'avg_precision_at_k',   label: 'Precision@K',  isLatency: false, tooltip: 'Precision@K\nFraction of relevant docs among the top K results.\nExample: 3 relevant out of 10 → P@10 = 0.30.\nRange: 0–1, higher is better.' },
       { key: 'avg_recall_at_k',      label: 'Recall@K',     isLatency: false, tooltip: 'Recall@K\nFraction of known relevant docs found in top K.\nExample: 3 found out of 5 known → Recall = 0.60.\nRange: 0–1, higher is better.' },
-      { key: 'avg_score_separation', label: 'Sep',          isLatency: false, tooltip: 'Score Separation = rel_mean − non_rel_mean\nPositive: relevant docs score higher than non-relevant ✓\nNegative: non-relevant docs outscore relevant ones ✗\nHigher is better; negative = ranking is inverted.' },
+      { key: 'avg_score_separation', label: 'Sep',          isLatency: false, tooltip: 'Score separation: relevant docs score minus non-relevant docs score (both min-max normalised within result set).\nRange: roughly −1 to +1. Positive = relevant docs score higher than non-relevant ✓\nNegative = non-relevant docs outscore relevant ones ✗\nHigher is better.' },
       { key: 'avg_latency_ms',       label: 'Latency',      isLatency: true,  tooltip: 'Latency (ms)\nAverage query execution time in milliseconds.\nLower is better.' },
-      { key: 'avg_score_mean',       label: 'Score Mean',   isLatency: false, tooltip: 'Score Mean\nMean score across all returned documents.\nIndicates the algorithm\'s overall confidence in its results.' },
+      { key: 'composite_score',      label: 'Score',        isLatency: false, isPercent: true, tooltip: 'Composite score\nAverage of NDCG@K, MRR, Precision@K, Recall@K, inverted normalised latency, and (when present) score separation.\nRange: 0–1, higher is better.' },
     ];
 
     const algoIds = run.algorithm_ids || [];
@@ -915,7 +940,10 @@
       const cells = METRICS.map(m => {
         const val = run.summary?.[aid]?.[m.key];
         if (val === null || val === undefined) return '<td>—</td>';
-        const fmt = m.isLatency ? val.toFixed(0) + 'ms' : val.toFixed(4);
+        let fmt;
+        if (m.isLatency) fmt = val.toFixed(0) + 'ms';
+        else if (m.isPercent) fmt = (val * 100).toFixed(1) + '%';
+        else fmt = val.toFixed(4);
         const isBest  = colBest[m.key]  !== undefined && val === colBest[m.key];
         const isWorst = colWorst[m.key] !== undefined && val === colWorst[m.key];
         const cls = isBest ? 'cell-best' : isWorst ? 'cell-worst' : '';
@@ -1036,6 +1064,7 @@
     document.getElementById('pc_host').value = 'localhost';
     document.getElementById('pc_port').value = '9200';
     document.getElementById('pc_use_ssl').checked = false;
+    document.getElementById('pc_timeout_s').value = '60';
     document.getElementById('pc_auth_type').value = 'none';
     document.getElementById('pc_username').value = '';
     document.getElementById('pc_password').value = '';
@@ -1092,11 +1121,14 @@
     const host = gid(prefix === 'pc' ? 'pc_host' : profileEditFieldId(prefix, 'host')) || 'localhost';
     const portRaw = gid(prefix === 'pc' ? 'pc_port' : profileEditFieldId(prefix, 'port'));
     const port = Math.min(65535, Math.max(1, parseInt(portRaw || '9200', 10) || 9200));
+    const timeoutRaw = gid(prefix === 'pc' ? 'pc_timeout_s' : profileEditFieldId(prefix, 'timeout_s'));
+    const timeout_s = Math.min(300, Math.max(1, parseInt(timeoutRaw || '60', 10) || 60));
     const base = {
       host,
       port,
       use_ssl: gc(prefix === 'pc' ? 'pc_use_ssl' : profileEditFieldId(prefix, 'use_ssl')),
       auth_type: auth,
+      timeout_s,
       username: null,
       password: null,
       aws_region: null,
@@ -1210,7 +1242,10 @@
           <div class="form-row" style="margin:0"><label>Host</label><input id="${id('host')}" class="form-input" value="${esc(os.host)}" /></div>
           <div class="form-row" style="margin:0"><label>Port</label><input id="${id('port')}" class="form-input" type="number" min="1" max="65535" value="${esc(os.port)}" /></div>
         </div>
-        <div class="field-row" style="margin-top:6px;"><label>Use SSL</label><input type="checkbox" id="${id('use_ssl')}" ${os.use_ssl ? 'checked' : ''} /></div>
+        <div class="form-row-2" style="margin-top:6px;">
+          <div class="field-row" style="margin:0"><label>Use SSL</label><input type="checkbox" id="${id('use_ssl')}" ${os.use_ssl ? 'checked' : ''} /></div>
+          <div class="form-row" style="margin:0"><label>Timeout (s)</label><input id="${id('timeout_s')}" class="form-input" type="number" min="1" max="300" value="${os.timeout_s ?? 60}" /></div>
+        </div>
         <div class="form-row"><label>Auth type</label>
           <select id="${id('auth_type')}" class="form-input" onchange="syncProfileAuthVisibility('${pid}')">
             <option value="none" ${auth === 'none' ? 'selected' : ''}>none</option>

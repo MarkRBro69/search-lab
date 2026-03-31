@@ -30,9 +30,6 @@ class OpenSearchConfig(BaseModel):
     username: str | None = None
     password: str | None = None
     aws_region: str | None = None
-    aws_access_key_id: str | None = None
-    aws_secret_access_key: str | None = None
-    aws_session_token: str | None = None
 
     @model_validator(mode="after")
     def validate_auth_fields(self) -> OpenSearchConfig:

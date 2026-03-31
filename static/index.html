@@ -317,11 +317,7 @@
       </div>
       <div id="pc_auth_aws" class="profile-cond">
         <div class="form-row"><label>AWS Region</label><input id="pc_aws_region" class="form-input" placeholder="us-east-1" /></div>
-        <div class="form-row-2">
-          <div class="form-row" style="margin:0"><label>Access Key ID</label><input id="pc_aws_access_key_id" class="form-input" autocomplete="off" /></div>
-          <div class="form-row" style="margin:0"><label>Secret Access Key</label><input id="pc_aws_secret_access_key" class="form-input" type="password" autocomplete="new-password" /></div>
-        </div>
-        <div class="form-row"><label>Session Token</label><input id="pc_aws_session_token" class="form-input" type="password" placeholder="Required for temporary (STS) credentials" autocomplete="new-password" /></div>
+        <div class="form-hint">Credentials are read from the environment (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN) or IAM role — not stored in profiles.</div>
       </div>
       <h3 style="margin-top:12px;">Embedding</h3>
       <div class="form-row"><label>Provider</label>
@@ -336,11 +332,7 @@
       <div id="pc_embed_bedrock" class="profile-cond">
         <div class="form-row"><label>Model name</label><input id="pc_bedrock_model_name" class="form-input" placeholder="e.g. amazon.titan-embed-text-v1" /></div>
         <div class="form-row"><label>AWS Region</label><input id="pc_embed_aws_region" class="form-input" /></div>
-        <div class="form-row-2">
-          <div class="form-row" style="margin:0"><label>Access Key ID</label><input id="pc_embed_aws_access_key_id" class="form-input" autocomplete="off" /></div>
-          <div class="form-row" style="margin:0"><label>Secret Access Key</label><input id="pc_embed_aws_secret_access_key" class="form-input" type="password" autocomplete="new-password" /></div>
-        </div>
-        <div class="form-row"><label>Session Token</label><input id="pc_embed_aws_session_token" class="form-input" type="password" placeholder="Required for temporary (STS) credentials" autocomplete="new-password" /></div>
+        <div class="form-hint">Credentials are read from the environment (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN) or IAM role — not stored in profiles.</div>
       </div>
       <h3 style="margin-top:12px;">Indices</h3>
       <div class="indices-header"><span>Logical key</span><span>Physical index name</span><span>BM25 fields (comma-sep)</span><span></span></div>

@@ -21,18 +21,10 @@ _client_cache: dict[str, OpenSearch] = {}
 def _aws_sigv4_auth(config: OpenSearchConfig) -> AWS4Auth:
     region = config.aws_region or "us-east-1"
     service = "es"
-    if config.aws_access_key_id and config.aws_secret_access_key:
-        return AWS4Auth(
-            config.aws_access_key_id,
-            config.aws_secret_access_key,
-            region,
-            service,
-            session_token=config.aws_session_token,
-        )
     session = boto3.Session(region_name=region)
     creds = session.get_credentials()
     if creds is None:
-        msg = "AWS SigV4 auth requires credentials (profile keys or default credential chain)"
+        msg = "AWS SigV4 auth requires credentials from the default credential chain (env vars or IAM role)"
         raise ValueError(msg)
     frozen = creds.get_frozen_credentials()
     return AWS4Auth(

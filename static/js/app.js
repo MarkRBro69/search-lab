@@ -1040,16 +1040,10 @@
     document.getElementById('pc_username').value = '';
     document.getElementById('pc_password').value = '';
     document.getElementById('pc_aws_region').value = '';
-    document.getElementById('pc_aws_access_key_id').value = '';
-    document.getElementById('pc_aws_secret_access_key').value = '';
-    document.getElementById('pc_aws_session_token').value = '';
     document.getElementById('pc_embed_provider').value = 'local_sentence_transformers';
     document.getElementById('pc_model_name').value = 'all-MiniLM-L6-v2';
     document.getElementById('pc_bedrock_model_name').value = '';
     document.getElementById('pc_embed_aws_region').value = '';
-    document.getElementById('pc_embed_aws_access_key_id').value = '';
-    document.getElementById('pc_embed_aws_secret_access_key').value = '';
-    document.getElementById('pc_embed_aws_session_token').value = '';
     const idxList = document.getElementById('pc_indices_list');
     if (idxList) { idxList.innerHTML = ''; addIndexRow('pc'); }
     syncProfileAuthVisibility('pc');
@@ -1106,9 +1100,6 @@
       username: null,
       password: null,
       aws_region: null,
-      aws_access_key_id: null,
-      aws_secret_access_key: null,
-      aws_session_token: null,
     };
     if (auth === 'basic') {
       base.username = gid(prefix === 'pc' ? 'pc_username' : profileEditFieldId(prefix, 'username')) || null;
@@ -1116,13 +1107,6 @@
     }
     if (auth === 'aws_signature_v4') {
       base.aws_region = gid(prefix === 'pc' ? 'pc_aws_region' : profileEditFieldId(prefix, 'aws_region')) || null;
-      base.aws_access_key_id =
-        gid(prefix === 'pc' ? 'pc_aws_access_key_id' : profileEditFieldId(prefix, 'aws_access_key_id')) || null;
-      base.aws_secret_access_key =
-        gid(prefix === 'pc' ? 'pc_aws_secret_access_key' : profileEditFieldId(prefix, 'aws_secret_access_key')) ||
-        null;
-      base.aws_session_token =
-        gid(prefix === 'pc' ? 'pc_aws_session_token' : profileEditFieldId(prefix, 'aws_session_token')) || null;
     }
     return base;
   }
@@ -1139,9 +1123,6 @@
       provider: prov,
       model_name: 'all-MiniLM-L6-v2',
       aws_region: null,
-      aws_access_key_id: null,
-      aws_secret_access_key: null,
-      aws_session_token: null,
     };
     if (prov === 'local_sentence_transformers') {
       emb.model_name =
@@ -1152,15 +1133,6 @@
         gid(prefix === 'pc' ? 'pc_bedrock_model_name' : profileEditFieldId(prefix, 'bedrock_model_name')) || '';
       emb.aws_region =
         gid(prefix === 'pc' ? 'pc_embed_aws_region' : profileEditFieldId(prefix, 'embed_aws_region')) || null;
-      emb.aws_access_key_id =
-        gid(prefix === 'pc' ? 'pc_embed_aws_access_key_id' : profileEditFieldId(prefix, 'embed_aws_access_key_id')) ||
-        null;
-      emb.aws_secret_access_key =
-        gid(prefix === 'pc' ? 'pc_embed_aws_secret_access_key' : profileEditFieldId(prefix, 'embed_aws_secret_access_key')) ||
-        null;
-      emb.aws_session_token =
-        gid(prefix === 'pc' ? 'pc_embed_aws_session_token' : profileEditFieldId(prefix, 'embed_aws_session_token')) ||
-        null;
     }
     return emb;
   }
@@ -1254,11 +1226,7 @@
         </div>
         <div id="pe_${pid}_auth_aws" class="profile-cond${awsVis}">
           <div class="form-row"><label>AWS Region</label><input id="${id('aws_region')}" class="form-input" value="${esc(os.aws_region)}" /></div>
-          <div class="form-row-2">
-            <div class="form-row" style="margin:0"><label>Access Key ID</label><input id="${id('aws_access_key_id')}" class="form-input" value="${esc(os.aws_access_key_id)}" autocomplete="off" /></div>
-            <div class="form-row" style="margin:0"><label>Secret Access Key</label><input id="${id('aws_secret_access_key')}" class="form-input" type="password" placeholder="(unchanged if empty)" autocomplete="new-password" /></div>
-          </div>
-          <div class="form-row"><label>Session Token</label><input id="${id('aws_session_token')}" class="form-input" type="password" placeholder="Required for temporary (STS) credentials" autocomplete="new-password" /></div>
+          <div class="form-hint">Credentials are read from the environment (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN) or IAM role — not stored in profiles.</div>
         </div>
         <h3 style="margin-top:12px;">Embedding</h3>
         <div class="form-row"><label>Provider</label>
@@ -1273,11 +1241,7 @@
         <div id="pe_${pid}_embed_bedrock" class="profile-cond${bedVis}">
           <div class="form-row"><label>Model name</label><input id="${id('bedrock_model_name')}" class="form-input" value="${prov === 'aws_bedrock' ? esc(emb.model_name) : ''}" /></div>
           <div class="form-row"><label>AWS Region</label><input id="${id('embed_aws_region')}" class="form-input" value="${esc(emb.aws_region)}" /></div>
-          <div class="form-row-2">
-            <div class="form-row" style="margin:0"><label>Access Key ID</label><input id="${id('embed_aws_access_key_id')}" class="form-input" value="${esc(emb.aws_access_key_id)}" autocomplete="off" /></div>
-            <div class="form-row" style="margin:0"><label>Secret Access Key</label><input id="${id('embed_aws_secret_access_key')}" class="form-input" type="password" placeholder="(unchanged if empty)" autocomplete="new-password" /></div>
-          </div>
-          <div class="form-row"><label>Session Token</label><input id="${id('embed_aws_session_token')}" class="form-input" type="password" placeholder="Required for temporary (STS) credentials" autocomplete="new-password" /></div>
+          <div class="form-hint">Credentials are read from the environment (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN) or IAM role — not stored in profiles.</div>
         </div>
         <h3 style="margin-top:12px;">Indices</h3>
         <div class="indices-header"><span>Logical key</span><span>Physical index name</span><span>BM25 fields (comma-sep)</span><span></span></div>

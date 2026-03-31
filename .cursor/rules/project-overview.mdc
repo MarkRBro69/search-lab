@@ -14,9 +14,9 @@ Recall@K, latency, and score separation. Results persist in MongoDB.
 
 - Python 3.14, uv (package manager), ruff (linter/formatter)
 - FastAPI (async web framework), Pydantic v2 (schemas)
-- OpenSearch 2.x (search engine — BM25, KNN, RRF)
-- sentence-transformers (`all-MiniLM-L6-v2`, 384d) — local embedding model
-- MongoDB + Motor (async) — benchmark result storage
+- OpenSearch 2.x (search engine — BM25, KNN, RRF); `requests-aws4auth` for AWS SigV4
+- sentence-transformers — local embedding model (name set via `LOCAL_MODEL_NAME` env var, default `all-MiniLM-L6-v2`); `boto3` for AWS Bedrock
+- MongoDB + Motor (async) — benchmark result storage + connection profiles
 - structlog (structured logging)
 - pytest + pytest-asyncio (testing)
 
@@ -26,6 +26,7 @@ Recall@K, latency, and score separation. Results persist in MongoDB.
 |---|---|
 | `search` | Search algorithms (BM25/semantic/hybrid/RRF), indexing, per-query eval |
 | `experiments` | **Core**: Algorithm configs, QueryTemplates, N×M BenchmarkRun engine |
+| `profiles` | Connection Profiles: OpenSearch endpoint + embedding model + configurable indices, active profile DI |
 | `agents` | (stub) Future LLM query enrichment |
 
 ## Global Constraints

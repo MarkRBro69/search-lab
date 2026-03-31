@@ -14,7 +14,7 @@ Read this file before editing any file under `src/modules/experiments/`.
 Three aggregates live in `src/modules/experiments/domain/models.py`:
 
 ```
-Algorithm        — named search configuration (mode, weights, filters, index)
+Algorithm        — named search configuration (mode, weights, filters)
 QueryTemplate    — reusable query + ground-truth relevant_ids
 BenchmarkRun     — result of running N algorithms × M templates
 ```
@@ -25,13 +25,18 @@ BenchmarkRun     — result of running N algorithms × M templates
 class Algorithm(BaseModel):
     id: str                        # uuid4, auto-generated
     name: str                      # human label, e.g. "Hybrid 30/70 no-filter"
-    mode: Literal["bm25", "semantic", "hybrid", "rrf"]
+    mode: SearchMode               # bm25 | semantic | hybrid | rrf (from src.shared.search_mode)
     bm25_weight: float             # [0, 1]
     knn_weight: float              # [0, 1]
     num_candidates: int            # KNN candidates pool [10, 500]
-    index: str                     # "all" | "procedures" | "doctors" | "reviews"
-    filters: AlgorithmFilters      # optional domain filters
+    filters: AlgorithmFilters      # domain-agnostic: filter_term / filter_gte / filter_lte
+                                   # same format as SearchParams — no domain-specific fields
 ```
+
+**`AlgorithmFilters` is domain-agnostic** — uses `filter_term: list[str]`, `filter_gte: list[str]`,
+`filter_lte: list[str]` (format `"field:value"`), identical to `SearchParams`. Never add
+domain-specific fields (`min_rating`, `is_surgical`, etc.) — use the generic filter format instead.
+Index selection lives on `QueryTemplate.index`, not on `Algorithm`.
 
 **Adding a new search mode:** add the literal to `Algorithm.mode` AND add the
 corresponding branch in `experiments_service.execute_benchmark` where it calls
@@ -149,6 +154,25 @@ All request/response schemas are defined inline in `presentation/router.py` (not
 `schemas.py`) because the domain models (`Algorithm`, `QueryTemplate`, `BenchmarkRun`) are used
 directly as response models. Only input shapes (`AlgorithmCreate`, `TemplateCreate`, etc.)
 need dedicated Pydantic models.
+
+## Validation Rules (Non-Negotiable)
+
+### Hybrid weights
+`bm25_weight + knn_weight` **must equal 1.0** (tolerance 1e-9) — enforced via
+`@model_validator(mode="after")` on `Algorithm` (domain) and `__post_init__` on
+`SearchParams` (application). Any deviation raises a hard error (ValidationError / ValueError).
+Never skip this check — without it the hybrid score is arbitrarily scaled and metrics
+are meaningless.
+
+### ID normalization
+All document IDs in search hits must be normalized to `str` **at the parse point**
+(`_parse_hits` in `search_service.py`). Downstream code (eval, benchmark) must never
+apply redundant `str()` casts — doing so signals a gap in the parse layer.
+
+### TransportError mapping
+Every synchronous OpenSearch call that can raise `opensearchpy.exceptions.TransportError`
+must be wrapped in try/except and re-raised as `ServiceUnavailableError` — the same pattern
+used for CRUD functions. **Search functions are not exempt.**
 
 ## Logging
 

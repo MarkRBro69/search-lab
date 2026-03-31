@@ -52,7 +52,8 @@ def _from_mongo(doc: dict | None) -> dict | None:
 
 async def create_algorithm(db: AsyncIOMotorDatabase, algo: Algorithm) -> Algorithm:  # type: ignore[type-arg]
     await db[_COL_ALGORITHMS].insert_one(_to_mongo(algo.model_dump()))
-    logger.info("algo_created", id=algo.id, name=algo.name)
+    log = logger.bind(module="experiments", operation="create_algorithm")
+    log.info("algo_created", id=algo.id, name=algo.name)
     return algo
 
 
@@ -79,7 +80,8 @@ async def delete_algorithm(db: AsyncIOMotorDatabase, algo_id: str) -> bool:  # t
 
 async def create_template(db: AsyncIOMotorDatabase, template: QueryTemplate) -> QueryTemplate:  # type: ignore[type-arg]
     await db[_COL_TEMPLATES].insert_one(_to_mongo(template.model_dump()))
-    logger.info("template_created", id=template.id, name=template.name)
+    log = logger.bind(module="experiments", operation="create_template")
+    log.info("template_created", id=template.id, name=template.name)
     return template
 
 
@@ -98,7 +100,8 @@ async def update_template(db: AsyncIOMotorDatabase, template: QueryTemplate) -> 
     data = _to_mongo(template.model_dump())
     _id = data.pop("_id")
     await db[_COL_TEMPLATES].replace_one({"_id": _id}, {"_id": _id, **data})
-    logger.info("template_updated", id=template.id)
+    log = logger.bind(module="experiments", operation="update_template")
+    log.info("template_updated", id=template.id)
     return template
 
 
@@ -114,7 +117,8 @@ async def delete_template(db: AsyncIOMotorDatabase, template_id: str) -> bool:  
 
 async def save_run(db: AsyncIOMotorDatabase, run: BenchmarkRun) -> BenchmarkRun:  # type: ignore[type-arg]
     await db[_COL_RUNS].insert_one(_to_mongo(run.model_dump()))
-    logger.info("benchmark_run_saved", id=run.id, name=run.name)
+    log = logger.bind(module="experiments", operation="save_run")
+    log.info("benchmark_run_saved", id=run.id, name=run.name)
     return run
 
 

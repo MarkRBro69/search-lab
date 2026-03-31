@@ -3,8 +3,8 @@ Demo script for semantic search using KNN in OpenSearch.
 
 Usage:
     uv run python scripts/semantic_search_demo.py "face lifting procedure"
-    uv run python scripts/semantic_search_demo.py "experienced surgeon in New York" --index doctors
-    uv run python scripts/semantic_search_demo.py "great results no side effects" --index reviews
+    uv run python scripts/semantic_search_demo.py "experienced surgeon in New York" --index index_b
+    uv run python scripts/semantic_search_demo.py "great results no side effects" --index index_c
 """
 
 from __future__ import annotations
@@ -16,20 +16,20 @@ from opensearchpy import OpenSearch
 from sentence_transformers import SentenceTransformer
 
 APP_ENV = os.getenv("APP_ENV", "development")
-PROCEDURES_INDEX = f"{APP_ENV}_procedures_v1"
-DOCTORS_INDEX = f"{APP_ENV}_doctors_v1"
-REVIEWS_INDEX = f"{APP_ENV}_reviews_v1"
+INDEX_A = f"{APP_ENV}_index_a_v1"
+INDEX_B = f"{APP_ENV}_index_b_v1"
+INDEX_C = f"{APP_ENV}_index_c_v1"
 
 INDEX_MAP = {
-    "procedures": PROCEDURES_INDEX,
-    "doctors": DOCTORS_INDEX,
-    "reviews": REVIEWS_INDEX,
+    "index_a": INDEX_A,
+    "index_b": INDEX_B,
+    "index_c": INDEX_C,
 }
 
 SOURCE_FIELDS = {
-    "procedures": ["name", "category", "body_area", "description", "average_rating", "tags"],
-    "doctors": ["name", "specialty", "city", "state", "average_rating", "bio"],
-    "reviews": ["title", "content", "rating", "procedure_name", "doctor_name", "worth_it"],
+    "index_a": ["name", "category", "body_area", "description", "average_rating", "tags"],
+    "index_b": ["name", "specialty", "city", "state", "average_rating", "bio"],
+    "index_c": ["title", "content", "rating", "procedure_name", "doctor_name", "worth_it"],
 }
 
 
@@ -99,9 +99,9 @@ def main() -> None:
     parser.add_argument("query", help="Search query text")
     parser.add_argument(
         "--index",
-        choices=["procedures", "doctors", "reviews"],
-        default="procedures",
-        help="Index to search (default: procedures)",
+        choices=["index_a", "index_b", "index_c"],
+        default="index_a",
+        help="Logical index key to search (default: index_a)",
     )
     parser.add_argument("--k", type=int, default=5, help="Number of results (default: 5)")
     args = parser.parse_args()

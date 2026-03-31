@@ -12,13 +12,19 @@ import structlog
 from src.modules.search.application.search_params import SearchParams  # noqa: TC001
 from src.modules.search.application.search_service import search
 from src.modules.search.infrastructure.repository import (
-    INDEX_ALIAS,
-    INDEX_PROCEDURES,
     build_bm25_query,
     rank_eval_native,
 )
+from src.shared.exceptions import (
+    EVAL_METRIC_INCOMPLETE,
+    INVALID_INDEX_KEY,
+    InvalidInputError,
+    UnprocessableEntityError,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from opensearchpy import OpenSearch
 
 logger = structlog.get_logger()
@@ -33,6 +39,21 @@ class _QueryData(TypedDict):
     id: str
     query: str
     ratings: list[_RatingData]
+
+
+class RankEvalQueryDetail(TypedDict):
+    """Per-query slice of the OpenSearch _rank_eval response."""
+
+    metric_score: float
+    unrated_docs: list[str]
+
+
+class RankEvalResult(TypedDict):
+    """Typed aggregate result from native OpenSearch _rank_eval."""
+
+    metric_score: float
+    details: dict[str, RankEvalQueryDetail]
+    failures: dict[str, str]
 
 
 # ---------------------------------------------------------------------------
@@ -81,10 +102,14 @@ async def evaluate(
     client: OpenSearch,
     params: SearchParams,
     relevant_ids: list[str],
-) -> dict:
+    index_alias: dict[str, str],
+    bm25_fields_by_key: dict[str, list[str]],
+    embed: Callable[[str], Awaitable[list[float]]],
+) -> dict[str, object]:
     relevant = set(relevant_ids)
-    result = await search(client, params)
-    hits = result["hits"]
+    result = await search(client, params, index_alias, bm25_fields_by_key, embed)
+    hits_raw = result["hits"]
+    hits: list[dict[str, object]] = hits_raw if isinstance(hits_raw, list) else []
 
     ranked_ids = [h["id"] for h in hits]
     k = params.size
@@ -96,7 +121,8 @@ async def evaluate(
 
     relevant_positions = [i + 1 for i, doc_id in enumerate(ranked_ids) if doc_id in relevant]
 
-    logger.info(
+    log = logger.bind(module="search", operation="evaluate")
+    log.info(
         "eval_done",
         query=params.q,
         mode=params.mode,
@@ -137,16 +163,25 @@ async def rank_eval(
     query_inputs: list[_QueryData],
     k: int,
     metric_name: str,
-) -> dict[str, object]:
+    index_alias: dict[str, str],
+    bm25_fields_by_key: dict[str, list[str]],
+) -> RankEvalResult:
     """Evaluate ranking quality using the native OpenSearch _rank_eval API (BM25 only)."""
     log = logger.bind(module="search", operation="rank_eval")
 
-    resolved_index = INDEX_ALIAS.get(index_key, INDEX_PROCEDURES)
+    if index_key not in index_alias:
+        raise InvalidInputError(
+            code=INVALID_INDEX_KEY,
+            detail=f"Unknown index key for rank_eval: {index_key!r}",
+        )
+    resolved_index = index_alias[index_key]
 
-    os_requests: list[dict] = [
+    os_requests: list[dict[str, object]] = [
         {
             "id": q["id"],
-            "request": {"query": build_bm25_query(q["query"], index_key)},
+            "request": {
+                "query": build_bm25_query(q["query"], index_key, bm25_fields_by_key),
+            },
             "ratings": [
                 {"_index": resolved_index, "_id": r["doc_id"], "rating": r["rating"]}
                 for r in q["ratings"]
@@ -164,23 +199,56 @@ async def rank_eval(
         k=k,
     )
     loop = asyncio.get_running_loop()
-    raw: dict = await loop.run_in_executor(
+    raw: dict[str, object] = await loop.run_in_executor(
         None,
-        partial(rank_eval_native, client, index_key, os_requests, metric),
+        partial(rank_eval_native, client, index_key, os_requests, metric, index_alias),
     )
 
-    details: dict[str, dict[str, object]] = {
-        qid: {
-            "metric_score": res["metric_score"],
-            "unrated_docs": [entry["_id"] for entry in res.get("unrated_docs", [])],
-        }
-        for qid, res in raw.get("details", {}).items()
-    }
+    details_raw = raw.get("details", {})
+    details: dict[str, dict[str, object]] = {}
+    if isinstance(details_raw, dict):
+        for qid, res in details_raw.items():
+            if not isinstance(res, dict):
+                continue
+            unrated = res.get("unrated_docs", [])
+            unrated_ids: list[str] = []
+            if isinstance(unrated, list):
+                for entry in unrated:
+                    if isinstance(entry, dict) and "_id" in entry:
+                        unrated_ids.append(str(entry["_id"]))
+            ms_raw = res.get("metric_score")
+            metric_score_detail = float(ms_raw) if isinstance(ms_raw, (int, float)) else 0.0
+            details[str(qid)] = {
+                "metric_score": metric_score_detail,
+                "unrated_docs": unrated_ids,
+            }
 
     log.info("rank_eval_done", overall_score=raw.get("metric_score"), num_queries=len(details))
 
-    return {
-        "metric_score": raw["metric_score"],
+    failures_raw = raw.get("failures", {})
+    failures: dict[str, str] = {}
+    if isinstance(failures_raw, dict):
+        for fk, fv in failures_raw.items():
+            failures[str(fk)] = str(fv)
+
+    metric_score = raw.get("metric_score")
+    if metric_score is None:
+        raise UnprocessableEntityError(
+            code=EVAL_METRIC_INCOMPLETE,
+            detail="Rank eval response missing metric_score",
+        )
+
+    try:
+        overall_score = float(metric_score)
+    except TypeError, ValueError:
+        raise UnprocessableEntityError(
+            code=EVAL_METRIC_INCOMPLETE,
+            detail="Rank eval response metric_score is not a valid number",
+        ) from None
+
+    out: RankEvalResult = {
+        "metric_score": overall_score,
         "details": details,
-        "failures": raw.get("failures", {}),
+        "failures": failures,
     }
+    return out

@@ -32,6 +32,16 @@ async def execute_search(query: SearchQuery) -> SearchResult:
     log.info("search_completed", hits=len(results), latency_ms=elapsed)
 ```
 
+## Non-HTTP contexts (lifespan, background tasks)
+
+For code running outside an HTTP request (lifespan startup/shutdown, asyncio tasks):
+bind `request_id="-"` explicitly — the middleware contextvars are not populated there.
+
+```python
+log = logger.bind(module="main", operation="lifespan", request_id="-")
+log.info("app_starting")
+```
+
 ## Log Levels
 
 - `DEBUG` — internal steps, intermediate values (dev only)

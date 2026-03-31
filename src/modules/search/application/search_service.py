@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import structlog
 
@@ -17,9 +17,12 @@ from src.modules.search.infrastructure.repository import (
     search_knn,
     search_knn_wide,
 )
-from src.shared.infrastructure.embedding import embed_async
+from src.shared.exceptions import SEARCH_INVALID_MODE, InvalidInputError
+from src.shared.search_mode import SearchMode
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from opensearchpy import OpenSearch
 
 logger = structlog.get_logger()
@@ -30,14 +33,20 @@ logger = structlog.get_logger()
 # ---------------------------------------------------------------------------
 
 
-def _minmax(hits: list[dict], score_key: str = "score") -> None:
+def _minmax(hits: list[dict[str, object]], score_key: str = "score") -> None:
     """Min-max normalize scores in-place."""
     if not hits:
         return
-    lo = min(h[score_key] for h in hits)
-    hi = max(h[score_key] for h in hits)
+    scores = [float(h[score_key]) for h in hits if isinstance(h.get(score_key), (int, float))]
+    if not scores:
+        return
+    lo = min(scores)
+    hi = max(scores)
     for h in hits:
-        h[score_key] = round((h[score_key] - lo) / (hi - lo), 6) if hi > lo else 1.0
+        raw = h.get(score_key)
+        if not isinstance(raw, (int, float)):
+            continue
+        h[score_key] = round((float(raw) - lo) / (hi - lo), 6) if hi > lo else 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -45,16 +54,27 @@ def _minmax(hits: list[dict], score_key: str = "score") -> None:
 # ---------------------------------------------------------------------------
 
 
-def _parse_hits(raw: dict) -> tuple[int, list[dict]]:
+def _parse_hits(raw: dict[str, object]) -> tuple[int, list[dict[str, object]]]:
     total = _extract_total(raw)
-    hits = []
-    for h in raw["hits"]["hits"]:
-        src = h["_source"].copy()
+    hits_obj = raw["hits"]
+    if not isinstance(hits_obj, dict):
+        return total, []
+    raw_hits = hits_obj.get("hits", [])
+    if not isinstance(raw_hits, list):
+        return total, []
+    hits: list[dict[str, object]] = []
+    for h in raw_hits:
+        if not isinstance(h, dict):
+            continue
+        src_raw = h.get("_source")
+        src: dict[str, object] = dict(src_raw) if isinstance(src_raw, dict) else {}
         src.pop("embedding", None)
-        hit: dict[str, Any] = {
-            "id": h["_id"],
+        score_raw = h.get("_score")
+        score = float(score_raw) if isinstance(score_raw, (int, float)) else 0.0
+        hit: dict[str, object] = {
+            "id": str(h["_id"]),
             "index": h["_index"],
-            "score": h["_score"] or 0.0,
+            "score": score,
             "source": src,
         }
         if "_explanation" in h:
@@ -69,17 +89,23 @@ def _parse_hits(raw: dict) -> tuple[int, list[dict]]:
 
 
 def _hybrid_combine(
-    bm25_hits: list[dict],
-    knn_hits: list[dict],
+    bm25_hits: list[dict[str, object]],
+    knn_hits: list[dict[str, object]],
     params: SearchParams,
-) -> list[dict]:
-    # Build lookup maps
-    bm25_map: dict[str, dict] = {h["id"]: h for h in bm25_hits}
-    knn_map: dict[str, dict] = {h["id"]: h for h in knn_hits}
+) -> list[dict[str, object]]:
+    bm25_map: dict[str, dict[str, object]] = {str(h["id"]): h for h in bm25_hits}
+    knn_map: dict[str, dict[str, object]] = {str(h["id"]): h for h in knn_hits}
 
-    # Normalize scores within each list
-    bm25_scores = {h["id"]: h["score"] for h in bm25_hits}
-    knn_scores = {h["id"]: h["score"] for h in knn_hits}
+    bm25_scores = {
+        str(h["id"]): float(h["score"])
+        for h in bm25_hits
+        if isinstance(h.get("score"), (int, float))
+    }
+    knn_scores = {
+        str(h["id"]): float(h["score"])
+        for h in knn_hits
+        if isinstance(h.get("score"), (int, float))
+    }
 
     def _norm(scores: dict[str, float]) -> dict[str, float]:
         if not scores:
@@ -93,7 +119,7 @@ def _hybrid_combine(
     knn_norm = _norm(knn_scores)
 
     all_ids = set(bm25_map) | set(knn_map)
-    docs: list[dict[str, Any]] = []
+    docs: list[dict[str, object]] = []
 
     for doc_id in all_ids:
         b_n = bm25_norm.get(doc_id, 0.0)
@@ -102,7 +128,7 @@ def _hybrid_combine(
 
         source_hit = bm25_map.get(doc_id) or knn_map.get(doc_id)
         assert source_hit is not None
-        doc: dict[str, Any] = {
+        doc: dict[str, object] = {
             "id": doc_id,
             "index": source_hit["index"],
             "score": round(combined, 6),
@@ -119,7 +145,7 @@ def _hybrid_combine(
             }
         docs.append(doc)
 
-    docs.sort(key=lambda d: d["score"], reverse=True)
+    docs.sort(key=lambda d: float(d["score"]), reverse=True)
     return docs[: params.size]
 
 
@@ -131,21 +157,20 @@ _RRF_K = 60  # standard constant from the original RRF paper
 
 
 def _rrf_combine(
-    bm25_hits: list[dict],
-    knn_hits: list[dict],
+    bm25_hits: list[dict[str, object]],
+    knn_hits: list[dict[str, object]],
     params: SearchParams,
-) -> list[dict]:
-    bm25_map: dict[str, dict] = {h["id"]: h for h in bm25_hits}
-    knn_map: dict[str, dict] = {h["id"]: h for h in knn_hits}
-    bm25_rank: dict[str, int] = {h["id"]: i + 1 for i, h in enumerate(bm25_hits)}
-    knn_rank: dict[str, int] = {h["id"]: i + 1 for i, h in enumerate(knn_hits)}
+) -> list[dict[str, object]]:
+    bm25_map: dict[str, dict[str, object]] = {str(h["id"]): h for h in bm25_hits}
+    knn_map: dict[str, dict[str, object]] = {str(h["id"]): h for h in knn_hits}
+    bm25_rank: dict[str, int] = {str(h["id"]): i + 1 for i, h in enumerate(bm25_hits)}
+    knn_rank: dict[str, int] = {str(h["id"]): i + 1 for i, h in enumerate(knn_hits)}
 
-    # Penalty rank for a doc missing from one list
     bm25_miss = len(bm25_hits) + 1
     knn_miss = len(knn_hits) + 1
 
     all_ids = set(bm25_map) | set(knn_map)
-    docs: list[dict[str, Any]] = []
+    docs: list[dict[str, object]] = []
 
     for doc_id in all_ids:
         r_b = bm25_rank.get(doc_id, bm25_miss)
@@ -156,7 +181,7 @@ def _rrf_combine(
 
         source_hit = bm25_map.get(doc_id) or knn_map.get(doc_id)
         assert source_hit is not None
-        doc: dict[str, Any] = {
+        doc: dict[str, object] = {
             "id": doc_id,
             "index": source_hit["index"],
             "score": round(combined, 6),
@@ -172,7 +197,7 @@ def _rrf_combine(
             }
         docs.append(doc)
 
-    docs.sort(key=lambda d: d["score"], reverse=True)
+    docs.sort(key=lambda d: float(d["score"]), reverse=True)
     return docs[: params.size]
 
 
@@ -181,8 +206,15 @@ def _rrf_combine(
 # ---------------------------------------------------------------------------
 
 
-async def search(client: OpenSearch, params: SearchParams) -> dict:
-    logger.info(
+async def search(
+    client: OpenSearch,
+    params: SearchParams,
+    index_alias: dict[str, str],
+    bm25_fields_by_key: dict[str, list[str]],
+    embed: Callable[[str], Awaitable[list[float]]],
+) -> dict[str, object]:
+    log = logger.bind(module="search", operation="search")
+    log.info(
         "search_request",
         query=params.q,
         mode=params.mode,
@@ -193,44 +225,57 @@ async def search(client: OpenSearch, params: SearchParams) -> dict:
     )
 
     loop = asyncio.get_running_loop()
-    vector: list[float] | None = None
 
-    # ── BM25-only ─────────────────────────────────────────────────────────
-    if params.mode == "bm25":
-        raw = await loop.run_in_executor(None, partial(search_bm25, client, params))
+    if params.mode == SearchMode.BM25:
+        raw = await loop.run_in_executor(
+            None,
+            partial(search_bm25, client, params, index_alias, bm25_fields_by_key),
+        )
         total, hits = _parse_hits(raw)
         _minmax(hits)
 
-    # ── Semantic-only ──────────────────────────────────────────────────────
-    elif params.mode == "semantic":
-        vector = await embed_async(params.q)
-        raw = await loop.run_in_executor(None, partial(search_knn, client, vector, params))
+    elif params.mode == SearchMode.SEMANTIC:
+        vector = await embed(params.q)
+        raw = await loop.run_in_executor(
+            None, partial(search_knn, client, vector, params, index_alias)
+        )
         total, hits = _parse_hits(raw)
 
-    # ── Hybrid (weighted, Python-side) ─────────────────────────────────────
-    elif params.mode == "hybrid":
-        vector = await embed_async(params.q)
+    elif params.mode == SearchMode.HYBRID:
+        vector = await embed(params.q)
         bm25_hits, knn_hits = await asyncio.gather(
-            loop.run_in_executor(None, partial(search_bm25_wide, client, params)),
-            loop.run_in_executor(None, partial(search_knn_wide, client, vector, params)),
+            loop.run_in_executor(
+                None,
+                partial(search_bm25_wide, client, params, index_alias, bm25_fields_by_key),
+            ),
+            loop.run_in_executor(
+                None, partial(search_knn_wide, client, vector, params, index_alias)
+            ),
         )
         hits = _hybrid_combine(bm25_hits, knn_hits, params)
         total = len(set(h["id"] for h in bm25_hits) | set(h["id"] for h in knn_hits))
 
-    # ── RRF ───────────────────────────────────────────────────────────────
-    elif params.mode == "rrf":
-        vector = await embed_async(params.q)
+    elif params.mode == SearchMode.RRF:
+        vector = await embed(params.q)
         bm25_hits, knn_hits = await asyncio.gather(
-            loop.run_in_executor(None, partial(search_bm25_wide, client, params)),
-            loop.run_in_executor(None, partial(search_knn_wide, client, vector, params)),
+            loop.run_in_executor(
+                None,
+                partial(search_bm25_wide, client, params, index_alias, bm25_fields_by_key),
+            ),
+            loop.run_in_executor(
+                None, partial(search_knn_wide, client, vector, params, index_alias)
+            ),
         )
         hits = _rrf_combine(bm25_hits, knn_hits, params)
         total = len(set(h["id"] for h in bm25_hits) | set(h["id"] for h in knn_hits))
 
     else:
-        raise ValueError(f"Unknown search mode: {params.mode!r}")
+        raise InvalidInputError(
+            code=SEARCH_INVALID_MODE,
+            detail=f"Unknown search mode: {params.mode!r}",
+        )
 
-    logger.info("search_done", query=params.q, mode=params.mode, total=total, returned=len(hits))
+    log.info("search_done", query=params.q, mode=params.mode, total=total, returned=len(hits))
 
     return {
         "query": params.q,
@@ -253,14 +298,24 @@ async def explain_document_async(
     index_key: str,
     doc_id: str,
     query: str,
-) -> dict:
+    index_alias: dict[str, str],
+    bm25_fields_by_key: dict[str, list[str]],
+) -> dict[str, object]:
     """Return OpenSearch native _explain response for a single document."""
     log = logger.bind(module="search", operation="explain_document_async")
     log.info("explain_requested", index_key=index_key, doc_id=doc_id)
     loop = asyncio.get_running_loop()
-    result: dict = await loop.run_in_executor(
+    result: dict[str, object] = await loop.run_in_executor(
         None,
-        partial(explain_document, client, index_key, doc_id, query),
+        partial(
+            explain_document,
+            client,
+            index_key,
+            doc_id,
+            query,
+            index_alias,
+            bm25_fields_by_key,
+        ),
     )
     log.info("explain_done", matched=result.get("matched"))
     return result

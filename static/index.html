@@ -4,270 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Search Lab</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --bg:        #0f1117;
-      --surface:   #1a1d27;
-      --surface2:  #22263a;
-      --surface3:  #2a2f47;
-      --border:    #2e3350;
-      --accent:    #6c63ff;
-      --accent2:   #4ecdc4;
-      --green:     #3ecf8e;
-      --yellow:    #f7c948;
-      --red:       #e55;
-      --text:      #e8eaf0;
-      --muted:     #7c82a0;
-      --tag-proc:  #3b4f9c;
-      --tag-doc:   #2d6b52;
-      --tag-rev:   #7a3d3d;
-    }
-
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
-
-    /* ─── Header ─── */
-    header { padding: 16px 32px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
-    .logo { font-size: 1.3rem; font-weight: 700; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .tagline { font-size: .75rem; color: var(--muted); }
-
-    /* ─── Layout ─── */
-    .layout { display: flex; gap: 0; min-height: calc(100vh - 53px); }
-    .sidebar { width: 280px; flex-shrink: 0; border-right: 1px solid var(--border); padding: 20px 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 20px; }
-    .main { flex: 1; padding: 24px 28px; min-width: 0; }
-
-    /* ─── Search box ─── */
-    .search-box { position: relative; margin-bottom: 16px; }
-    .search-box input { width: 100%; padding: 13px 48px 13px 16px; background: var(--surface); border: 1.5px solid var(--border); border-radius: 10px; color: var(--text); font-size: .95rem; outline: none; transition: border-color .2s; }
-    .search-box input:focus { border-color: var(--accent); }
-    .search-box input::placeholder { color: var(--muted); }
-    .search-box .btn-submit { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: var(--accent); border: none; border-radius: 7px; padding: 6px 12px; color: #fff; cursor: pointer; font-size: .9rem; transition: opacity .15s; }
-    .search-box .btn-submit:hover { opacity: .8; }
-
-    /* ─── Sidebar sections ─── */
-    .section-title { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: 8px; }
-
-    /* ─── Pill groups ─── */
-    .pill-group { display: flex; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; flex-wrap: wrap; }
-    .pill-group button { background: transparent; border: none; padding: 6px 12px; color: var(--muted); font-size: .8rem; cursor: pointer; transition: background .15s, color .15s; flex: 1; white-space: nowrap; }
-    .pill-group button.active { background: var(--accent); color: #fff; }
-    .pill-group button:not(:last-child) { border-right: 1px solid var(--border); }
-
-    /* ─── Sliders (hybrid weights) ─── */
-    .weights-section { display: none; }
-    .weights-section.visible { display: block; }
-    .weight-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-    .weight-label { font-size: .75rem; color: var(--muted); width: 30px; flex-shrink: 0; }
-    .weight-label span { color: var(--text); font-weight: 600; }
-    input[type=range] { flex: 1; accent-color: var(--accent); cursor: pointer; }
-    .weight-bar { height: 6px; border-radius: 3px; background: var(--surface2); border: 1px solid var(--border); overflow: hidden; display: flex; margin-top: 4px; }
-    .weight-bar .bm25-bar { background: var(--yellow); transition: width .2s; }
-    .weight-bar .knn-bar  { background: var(--accent2); transition: width .2s; }
-    .weight-legend { display: flex; gap: 12px; margin-top: 4px; font-size: .7rem; color: var(--muted); }
-    .weight-legend span { display: flex; align-items: center; gap: 4px; }
-    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-
-    /* ─── Number input ─── */
-    .field-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-    .field-row label { font-size: .75rem; color: var(--muted); flex: 1; }
-    .field-row input, .field-row select { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; color: var(--text); font-size: .78rem; width: 90px; outline: none; }
-    .field-row input[type=checkbox] { width: auto; accent-color: var(--accent); cursor: pointer; }
-
-    /* ─── Toggle ─── */
-    .toggle-row { display: flex; align-items: center; justify-content: space-between; }
-    .toggle-row label { font-size: .78rem; color: var(--muted); }
-    .toggle { position: relative; width: 36px; height: 20px; }
-    .toggle input { display: none; }
-    .toggle-slider { position: absolute; inset: 0; background: var(--surface2); border: 1px solid var(--border); border-radius: 20px; cursor: pointer; transition: .2s; }
-    .toggle-slider::before { content: ""; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px; background: var(--muted); border-radius: 50%; transition: .2s; }
-    .toggle input:checked + .toggle-slider { background: var(--accent); border-color: var(--accent); }
-    .toggle input:checked + .toggle-slider::before { transform: translateX(16px); background: #fff; }
-
-    /* ─── Divider ─── */
-    .divider { height: 1px; background: var(--border); }
-
-    /* ─── Buttons ─── */
-    .btn { border: none; border-radius: 8px; padding: 8px 14px; font-size: .8rem; cursor: pointer; transition: opacity .15s; }
-    .btn:hover { opacity: .85; }
-    .btn-primary { background: var(--accent); color: #fff; }
-    .btn-danger  { background: #5a1a1a; color: #f99; border: 1px solid var(--red); }
-    .btn-ghost   { background: transparent; color: var(--muted); border: 1px solid var(--border); }
-    .btn-green   { background: var(--green); color: #0a2e1d; font-weight: 600; }
-    .btn-sm      { padding: 5px 10px; font-size: .73rem; }
-
-    /* ─── Eval section in sidebar ─── */
-    .eval-count { font-size: .78rem; color: var(--muted); margin-bottom: 8px; }
-    .eval-count strong { color: var(--text); }
-
-    /* ─── Meta ─── */
-    .meta-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; min-height: 24px; }
-    .meta-text { font-size: .78rem; color: var(--muted); }
-    .meta-text strong { color: var(--text); }
-    .active-filters { display: flex; gap: 6px; flex-wrap: wrap; }
-    .filter-tag { font-size: .68rem; background: var(--surface3); border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px; color: var(--accent2); }
-
-    /* ─── Metrics panel ─── */
-    .metrics-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; display: none; }
-    .metrics-panel.visible { display: block; }
-    .metrics-panel h3 { font-size: .8rem; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 12px; }
-    .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-    .metric-card { background: var(--surface2); border-radius: 8px; padding: 10px 14px; text-align: center; }
-    .metric-card .val { font-size: 1.5rem; font-weight: 700; color: var(--accent2); }
-    .metric-card .lbl { font-size: .68rem; color: var(--muted); margin-top: 2px; }
-    .metric-info { margin-top: 10px; font-size: .75rem; color: var(--muted); }
-    .metric-info strong { color: var(--text); }
-    .pos-badges { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
-    .pos-badge { font-size: .68rem; background: var(--surface3); border-radius: 4px; padding: 1px 6px; color: var(--accent); }
-
-    /* ─── Spinner ─── */
-    .spinner { display: none; width: 28px; height: 28px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; margin: 40px auto; }
-    .spinner.active { display: block; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    /* ─── Error ─── */
-    .error-banner { background: #3d1a1a; border: 1px solid #7a3d3d; border-radius: 8px; padding: 10px 14px; font-size: .82rem; color: #f4a; margin-bottom: 14px; display: none; }
-    .error-banner.visible { display: block; }
-
-    /* ─── Results ─── */
-    #results { display: flex; flex-direction: column; gap: 10px; }
-
-    .card { background: var(--surface); border: 1.5px solid var(--border); border-radius: 12px; padding: 14px 18px; transition: border-color .15s; position: relative; }
-    .card:hover { border-color: var(--accent); }
-    .card.relevant { border-color: var(--green); }
-    .card.marked { border-color: var(--yellow); background: #1e1c0e; }
-
-    .card-top { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 6px; }
-    .card-checkbox { margin-top: 2px; flex-shrink: 0; width: 16px; height: 16px; accent-color: var(--yellow); cursor: pointer; display: none; }
-    .eval-mode .card-checkbox { display: block; }
-    .card-title { font-size: .95rem; font-weight: 600; flex: 1; line-height: 1.3; }
-    .score-badge { flex-shrink: 0; font-size: .7rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; background: var(--surface2); color: var(--accent2); border: 1px solid currentColor; }
-
-    .index-tag { display: inline-block; font-size: .65rem; text-transform: uppercase; letter-spacing: .07em; padding: 2px 7px; border-radius: 4px; font-weight: 600; margin-bottom: 6px; }
-    .index-tag.procedures { background: var(--tag-proc); }
-    .index-tag.doctors    { background: var(--tag-doc); }
-    .index-tag.reviews    { background: var(--tag-rev); }
-
-    .card-body { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 3px 14px; }
-    .card-field { font-size: .77rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .card-field strong { color: var(--text); font-weight: 500; }
-    .card-desc { font-size: .78rem; color: var(--muted); margin-top: 6px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-    .tags { margin-top: 6px; display: flex; gap: 5px; flex-wrap: wrap; }
-    .tag { font-size: .67rem; background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; color: var(--muted); }
-    .stars { color: var(--yellow); letter-spacing: -1px; }
-
-    /* ─── Score breakdown ─── */
-    .breakdown { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
-    .breakdown-title { font-size: .68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; margin-bottom: 6px; }
-    .breakdown-bars { display: flex; flex-direction: column; gap: 4px; }
-    .bk-row { display: flex; align-items: center; gap: 8px; }
-    .bk-label { font-size: .7rem; color: var(--muted); width: 120px; flex-shrink: 0; }
-    .bk-bar-wrap { flex: 1; height: 5px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
-    .bk-bar { height: 100%; border-radius: 3px; transition: width .3s; }
-    .bk-bm25 { background: var(--yellow); }
-    .bk-knn  { background: var(--accent2); }
-    .bk-combined { background: var(--accent); }
-    .bk-val { font-size: .7rem; color: var(--text); width: 40px; text-align: right; flex-shrink: 0; }
-    .rrf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
-    .rrf-cell { font-size: .72rem; color: var(--muted); }
-    .rrf-cell strong { color: var(--text); }
-
-    /* ─── Eval rank badge ─── */
-    .rank-badge { position: absolute; top: 10px; right: 10px; font-size: .65rem; background: var(--green); color: #0a2e1d; border-radius: 4px; padding: 2px 6px; font-weight: 700; display: none; }
-    .card.relevant .rank-badge { display: block; }
-
-    /* ─── Empty ─── */
-    .empty { text-align: center; color: var(--muted); padding: 50px 20px; font-size: .9rem; }
-    .empty .icon { font-size: 2rem; margin-bottom: 10px; }
-
-    /* ─── Scrollbar ─── */
-    ::-webkit-scrollbar { width: 6px; }
-    ::-webkit-scrollbar-track { background: var(--bg); }
-    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-
-    /* ─── Global tab nav ─── */
-    .tab-nav { margin-left: auto; display: flex; gap: 4px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 3px; }
-    .tab-nav button { background: transparent; border: none; padding: 5px 16px; border-radius: 6px; color: var(--muted); font-size: .82rem; cursor: pointer; transition: .15s; }
-    .tab-nav button.active { background: var(--accent); color: #fff; }
-
-    /* ─── Experiments pane ─── */
-    #experimentsPane { display: none; min-height: calc(100vh - 53px); flex-direction: column; }
-    #experimentsPane.visible { display: flex; }
-    .exp-layout { display: flex; flex: 1; min-height: 0; }
-    .exp-sidebar { width: 340px; flex-shrink: 0; border-right: 1px solid var(--border); padding: 20px 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
-    .exp-main { flex: 1; padding: 24px 28px; min-width: 0; overflow-y: auto; }
-
-    /* ─── Sub-tabs ─── */
-    .sub-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 20px; }
-    .sub-tab-btn { background: transparent; border: 1px solid var(--border); border-radius: 7px; padding: 6px 16px; color: var(--muted); font-size: .82rem; cursor: pointer; transition: .15s; }
-    .sub-tab-btn.active { background: var(--surface2); color: var(--text); border-color: var(--accent); }
-    .exp-tab-pane { display: none; }
-    .exp-tab-pane.visible { display: block; }
-
-    /* ─── Forms ─── */
-    .form-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; }
-    .form-card h3 { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .09em; margin-bottom: 12px; }
-    .form-row { display: flex; flex-direction: column; gap: 3px; margin-bottom: 9px; }
-    .form-row label { font-size: .72rem; color: var(--muted); }
-    .form-input { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; color: var(--text); font-size: .82rem; outline: none; width: 100%; }
-    .form-input:focus { border-color: var(--accent); }
-    textarea.form-input { resize: vertical; min-height: 58px; }
-    .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-
-    /* ─── Entity list ─── */
-    .entity-list { display: flex; flex-direction: column; gap: 8px; }
-    .entity-card { background: var(--surface); border: 1.5px solid var(--border); border-radius: 10px; padding: 11px 14px; display: flex; align-items: flex-start; gap: 10px; }
-    .entity-card.selected { border-color: var(--accent); background: rgba(108,99,255,.06); }
-    .entity-checkbox { margin-top: 2px; flex-shrink: 0; width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
-    .entity-info { flex: 1; min-width: 0; }
-    .entity-name { font-size: .88rem; font-weight: 600; margin-bottom: 3px; }
-    .entity-meta { font-size: .71rem; color: var(--muted); display: flex; gap: 6px; flex-wrap: wrap; }
-    .e-chip { background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; }
-    .entity-actions { display: flex; gap: 5px; flex-shrink: 0; }
-
-    /* ─── Relevant IDs editor ─── */
-    .rel-ids-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; min-height: 52px; display: flex; flex-wrap: wrap; gap: 4px; align-content: flex-start; cursor: text; }
-    .rel-id-chip { background: var(--surface3); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; font-size: .71rem; color: var(--accent2); display: flex; align-items: center; gap: 3px; }
-    .rel-id-chip button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: .9rem; padding: 0; line-height: 1; }
-    .rel-ids-inp { background: transparent; border: none; color: var(--text); font-size: .79rem; outline: none; flex: 1; min-width: 100px; padding: 2px 4px; }
-
-    /* ─── Benchmark table ─── */
-    .metric-selector { display: flex; gap: 3px; background: var(--surface2); border: 1px solid var(--border); border-radius: 7px; padding: 3px; flex-wrap: wrap; margin-bottom: 14px; }
-    .metric-selector button { background: transparent; border: none; padding: 4px 10px; border-radius: 5px; color: var(--muted); font-size: .72rem; cursor: pointer; transition: .15s; white-space: nowrap; }
-    .metric-selector button.active { background: var(--accent); color: #fff; }
-    .bench-table-wrap { overflow-x: auto; }
-    .bench-table { border-collapse: collapse; width: 100%; font-size: .79rem; }
-    .bench-table th { background: var(--surface2); color: var(--muted); font-size: .69rem; text-transform: uppercase; letter-spacing: .06em; padding: 8px 12px; border: 1px solid var(--border); text-align: left; white-space: nowrap; }
-    .bench-table td { border: 1px solid var(--border); padding: 8px 12px; white-space: nowrap; vertical-align: middle; }
-    .bench-table tr:hover td { background: rgba(255,255,255,.02); }
-    .cell-best { color: var(--green); font-weight: 700; }
-    .cell-worst { color: #e55; }
-    .cell-latency { color: var(--yellow); }
-    .cell-algo { font-weight: 600; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
-    .cell-summary { background: var(--surface2); font-weight: 700; }
-    .metric-bar { height: 4px; border-radius: 2px; background: var(--accent); margin-top: 3px; transition: width .3s; }
-
-    /* ─── Run history ─── */
-    .run-list { display: flex; flex-direction: column; gap: 7px; margin-top: 18px; }
-    .run-item { background: var(--surface); border: 1px solid var(--border); border-radius: 9px; padding: 11px 14px; cursor: pointer; transition: border-color .15s; display: flex; align-items: center; gap: 10px; }
-    .run-item:hover { border-color: var(--accent); }
-    .run-item.active-run { border-color: var(--accent2); }
-    .run-info { flex: 1; min-width: 0; }
-    .run-name { font-size: .86rem; font-weight: 600; }
-    .run-meta { font-size: .71rem; color: var(--muted); margin-top: 2px; }
-
-    /* ─── Empty state ─── */
-    .exp-empty { color: var(--muted); font-size: .85rem; padding: 32px 0; text-align: center; }
-  </style>
+  <link rel="stylesheet" href="/css/app.css" />
 </head>
 <body>
 
 <header>
   <span class="logo">Search Lab</span>
-  <span class="tagline">procedures · doctors · reviews</span>
+  <span class="tagline" id="headerTagline">no active profile</span>
   <div class="tab-nav">
-    <button class="active" onclick="showPane('search')">Search</button>
-    <button onclick="showPane('experiments')">Experiments</button>
+    <button type="button" class="active" data-pane="search" onclick="showPane('search')">Search</button>
+    <button type="button" data-pane="experiments" onclick="showPane('experiments')">Experiments</button>
+    <button type="button" data-pane="settings" onclick="showPane('settings')">Settings</button>
   </div>
 </header>
 
@@ -277,20 +24,16 @@
   <!-- ═══════════════════════════════ SIDEBAR ══════════════════════════════ -->
   <aside class="sidebar">
 
-    <!-- Search -->
-    <div>
-      <div class="section-title">Search</div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header">Search</div>
       <div class="search-box">
-        <input id="q" type="text" placeholder="e.g. rhinoplasty nose reshaping…" autocomplete="off" />
+        <input id="q" type="text" placeholder="Enter search query…" autocomplete="off" />
         <button class="btn-submit" onclick="doSearch()">⏎</button>
       </div>
     </div>
 
-    <div class="divider"></div>
-
-    <!-- Mode -->
-    <div>
-      <div class="section-title">Mode</div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header">Algorithm</div>
       <div class="pill-group" id="modeGroup">
         <button onclick="setMode('bm25')"     data-mode="bm25">BM25</button>
         <button onclick="setMode('semantic')" data-mode="semantic">Semantic</button>
@@ -300,7 +43,6 @@
 
       <!-- Hybrid weights (shown only for hybrid) -->
       <div class="weights-section visible" id="weightsSection" style="margin-top:12px;">
-        <div class="section-title" style="margin-bottom:6px;">Weights</div>
         <div class="weight-row">
           <div class="weight-label">BM25 <span id="bm25Pct">30%</span></div>
           <input type="range" id="bm25Slider" min="0" max="100" value="30" oninput="onWeightChange('bm25')" />
@@ -321,80 +63,45 @@
       </div>
     </div>
 
-    <div class="divider"></div>
-
-    <!-- Index -->
-    <div>
-      <div class="section-title">Collection</div>
-      <div class="pill-group" id="indexGroup">
-        <button onclick="setIndex('all')"        data-index="all"        class="active">All</button>
-        <button onclick="setIndex('procedures')" data-index="procedures">Procedures</button>
-        <button onclick="setIndex('doctors')"    data-index="doctors">Doctors</button>
-        <button onclick="setIndex('reviews')"    data-index="reviews">Reviews</button>
-      </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header">Collection</div>
+      <div class="pill-group" id="indexGroup"></div>
     </div>
 
-    <div class="divider"></div>
-
-    <!-- Options -->
-    <div>
-      <div class="section-title">Options</div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header">Options</div>
       <div class="field-row">
         <label>Results</label>
-        <select id="sizeSelect">
-          <option value="5">5</option>
-          <option value="10" selected>10</option>
-          <option value="20">20</option>
-          <option value="50">50</option>
-        </select>
+        <input type="number" id="sizeSelect" min="1" max="200" value="10" />
       </div>
       <div class="field-row">
         <label>KNN candidates <span style="color:var(--muted);font-size:.68rem">(accuracy)</span></label>
-        <select id="candidatesSelect">
-          <option value="30">30 (fast)</option>
-          <option value="50" selected>50</option>
-          <option value="100">100</option>
-          <option value="200">200 (accurate)</option>
-        </select>
+        <input type="number" id="candidatesSelect" min="1" max="500" value="50" />
       </div>
       <div class="toggle-row" style="margin-top:8px;">
         <label>Score breakdown (explain)</label>
-        <label class="toggle"><input type="checkbox" id="explainToggle" /><span class="toggle-slider"></span></label>
+        <label class="toggle"><input type="checkbox" id="explainToggle" onchange="onExplainToggle()" /><span class="toggle-slider"></span></label>
       </div>
     </div>
 
-    <div class="divider"></div>
-
-    <!-- Filters -->
-    <div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-        <div class="section-title" style="margin:0">Filters</div>
-        <button class="btn btn-ghost btn-sm" onclick="clearFilters()">Clear</button>
-      </div>
-      <div class="field-row"><label>Min rating (0–5)</label><input type="number" id="fMinRating" min="0" max="5" step="0.5" placeholder="—" /></div>
-      <div class="field-row"><label>Max cost (USD)</label><input type="number" id="fMaxCost" min="0" step="500" placeholder="—" /></div>
-      <div class="field-row"><label>Category</label><input type="text" id="fCategory" placeholder="Facial, Body…" /></div>
-      <div class="field-row"><label>Body area</label><input type="text" id="fBodyArea" placeholder="Nose, Face…" /></div>
-      <div class="field-row"><label>Surgical only</label><input type="checkbox" id="fSurgical" /></div>
-      <div class="field-row"><label>Specialty (doctors)</label><input type="text" id="fSpecialty" placeholder="Plastic Surgeon…" /></div>
-      <div class="field-row"><label>Min experience (yrs)</label><input type="number" id="fMinExp" min="0" placeholder="—" /></div>
-      <div class="field-row">
-        <label>Worth it (reviews)</label>
-        <select id="fWorthIt">
-          <option value="">Any</option>
-          <option value="Excellent">Excellent</option>
-          <option value="Good">Good</option>
-          <option value="Not Worth It">Not Worth It</option>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header">Filters</div>
+      <div class="filter-add-row">
+        <input id="filterField" type="text" class="filter-inp filter-inp-field" placeholder="field" autocomplete="off" />
+        <select id="filterType" class="filter-inp filter-inp-type">
+          <option value="term">= term</option>
+          <option value="gte">≥ min</option>
+          <option value="lte">≤ max</option>
         </select>
+        <input id="filterValue" type="text" class="filter-inp filter-inp-value" placeholder="value" autocomplete="off" onkeydown="if(event.key==='Enter')addFilter()" />
+        <button class="btn btn-primary btn-sm filter-add-btn" onclick="addFilter()">+</button>
       </div>
-      <div class="field-row"><label>Verified only</label><input type="checkbox" id="fVerified" /></div>
+      <div id="activeFiltersList" class="active-filters-list"></div>
+      <button class="btn btn-ghost btn-sm" style="margin-top:4px;width:100%;display:none" id="clearFiltersBtn" onclick="clearFilters()">Clear all</button>
     </div>
 
-    <div class="divider"></div>
-
-    <!-- Eval -->
-    <div>
-      <div class="section-title">Evaluation</div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-header">Evaluation</div>
       <p style="font-size:.72rem;color:var(--muted);margin-bottom:8px;">Enable eval mode, mark relevant documents, then run metrics.</p>
       <div class="toggle-row" style="margin-bottom:10px;">
         <label>Eval mode</label>
@@ -406,6 +113,35 @@
       <button class="btn btn-ghost btn-sm" style="width:100%;color:var(--accent2);border-color:var(--accent2);" onclick="saveAsTemplate()" id="saveTemplateBtn" disabled>Save as Template →</button>
     </div>
 
+    <div class="sidebar-section">
+      <div class="sidebar-section-header">Rank Eval <span style="font-size:.63rem;color:var(--muted);font-weight:400;margin-left:4px;">BM25 · native</span></div>
+      <p style="font-size:.72rem;color:var(--muted);margin-bottom:4px;">Build a query set from searches, run OpenSearch <code style="font-size:.7rem;">_rank_eval</code>.</p>
+      <div class="field-row">
+        <label>Index</label>
+        <select id="reIndex" class="filter-inp" style="flex:1;width:auto;"></select>
+      </div>
+      <div class="field-row">
+        <label>Metric</label>
+        <select id="reMetric" class="filter-inp" style="flex:1;width:auto;">
+          <option value="dcg" selected>DCG</option>
+          <option value="precision">Precision</option>
+          <option value="recall">Recall</option>
+          <option value="mean_reciprocal_rank">MRR</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <label>K</label>
+        <input type="number" id="reK" min="1" max="50" value="10" class="filter-inp" style="width:60px;" />
+      </div>
+      <div style="margin-top:2px;">
+        <div style="font-size:.72rem;color:var(--muted);margin-bottom:4px;">Queries: <strong id="reQueryCount">0</strong></div>
+        <div id="reQueryList"></div>
+      </div>
+      <button class="btn btn-ghost btn-sm" style="width:100%;" onclick="reAddCurrentQuery()">+ Add current query + marks</button>
+      <button class="btn btn-ghost btn-sm" style="width:100%;color:var(--muted);" onclick="reClearQueries()">Clear queries</button>
+      <button class="btn btn-green" style="width:100%;" onclick="runRankEval()" id="reRunBtn" disabled>▶ Run Rank Eval</button>
+    </div>
+
   </aside>
 
   <!-- ════════════════════════════ MAIN CONTENT ════════════════════════════ -->
@@ -415,13 +151,26 @@
       <div class="active-filters" id="activeFilters"></div>
     </div>
 
+    <div class="metrics-panel" id="rePanel">
+      <h3>Rank Eval Results &nbsp;<span id="rePanelMetric" style="font-size:.68rem;background:var(--surface3);padding:2px 9px;border-radius:10px;font-weight:600;color:var(--accent2);letter-spacing:.04em;"></span></h3>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+        <div class="metric-card" style="min-width:120px;">
+          <div class="val" id="reOverallScore">—</div>
+          <div class="lbl">Overall score</div>
+        </div>
+        <div style="font-size:.75rem;color:var(--muted);line-height:1.5;" id="reQuerySummary"></div>
+      </div>
+      <div id="reDetailTable"></div>
+      <div id="reFailures" style="display:none;margin-top:10px;"></div>
+    </div>
+
     <div class="metrics-panel" id="metricsPanel">
       <h3>Evaluation Results</h3>
       <div class="metrics-grid">
-        <div class="metric-card"><div class="val" id="mNDCG">—</div><div class="lbl">NDCG@K</div></div>
-        <div class="metric-card"><div class="val" id="mMRR">—</div><div class="lbl">MRR</div></div>
-        <div class="metric-card"><div class="val" id="mPrecision">—</div><div class="lbl">Precision@K</div></div>
-        <div class="metric-card"><div class="val" id="mRecall">—</div><div class="lbl">Recall@K</div></div>
+        <div class="metric-card" data-tooltip="Normalized Discounted Cumulative Gain&#10;Measures ranking quality — relevant docs ranked higher contribute more (log₂ position discount).&#10;Range: 0–1, higher is better."><div class="val" id="mNDCG">—</div><div class="lbl">NDCG@K</div></div>
+        <div class="metric-card" data-tooltip="Mean Reciprocal Rank&#10;Reciprocal of the position of the first relevant doc. E.g. first relevant at position 3 → score = 1/3.&#10;Range: 0–1, higher is better."><div class="val" id="mMRR">—</div><div class="lbl">MRR</div></div>
+        <div class="metric-card" data-tooltip="Precision@K&#10;Fraction of relevant docs among the top K results. E.g. 3 relevant out of 10 → P@10 = 0.30.&#10;Range: 0–1, higher is better."><div class="val" id="mPrecision">—</div><div class="lbl">Precision@K</div></div>
+        <div class="metric-card" data-tooltip="Recall@K&#10;Fraction of known relevant docs found in top K. E.g. 3 found out of 5 known → Recall = 0.60.&#10;Range: 0–1, higher is better."><div class="val" id="mRecall">—</div><div class="lbl">Recall@K</div></div>
       </div>
       <div class="metric-info" id="metricInfo"></div>
     </div>
@@ -448,28 +197,20 @@
         <div class="form-row"><label>Description</label><input id="algoDesc" class="form-input" placeholder="Optional notes" /></div>
         <div class="form-row">
           <label>Mode</label>
-          <select id="algoMode" class="form-input">
+          <select id="algoMode" class="form-input" onchange="onAlgoModeChange()">
             <option value="hybrid" selected>Hybrid</option>
             <option value="bm25">BM25</option>
             <option value="semantic">Semantic</option>
             <option value="rrf">RRF</option>
           </select>
         </div>
-        <div class="form-row-2">
+        <div id="algoWeightsRow" class="form-row-2">
           <div class="form-row" style="margin:0"><label>BM25 weight</label><input id="algoBm25" class="form-input" type="number" min="0" max="1" step="0.05" value="0.3" /></div>
           <div class="form-row" style="margin:0"><label>KNN weight</label><input id="algoKnn" class="form-input" type="number" min="0" max="1" step="0.05" value="0.7" /></div>
         </div>
-        <div class="form-row-2" style="margin-top:8px;">
-          <div class="form-row" style="margin:0"><label>KNN candidates</label><input id="algoCands" class="form-input" type="number" min="10" max="500" value="50" /></div>
-          <div class="form-row" style="margin:0">
-            <label>Index</label>
-            <select id="algoIndex" class="form-input">
-              <option value="all" selected>All</option>
-              <option value="procedures">Procedures</option>
-              <option value="doctors">Doctors</option>
-              <option value="reviews">Reviews</option>
-            </select>
-          </div>
+        <div id="algoCandsRow" class="form-row" style="margin-top:8px;">
+          <label>KNN candidates <span style="font-size:.68rem;color:var(--muted)">(hybrid / rrf only)</span></label>
+          <input id="algoCands" class="form-input" type="number" min="10" max="500" value="50" />
         </div>
         <button class="btn btn-primary" style="width:100%;margin-top:10px;" onclick="createAlgorithm()">+ Create Algorithm</button>
       </div>
@@ -479,16 +220,11 @@
     <div id="expSideTemplates" style="display:none;">
       <div class="section-title">New Template</div>
       <div class="form-card">
-        <div class="form-row"><label>Name *</label><input id="tmplName" class="form-input" placeholder="e.g. rhinoplasty intent" /></div>
-        <div class="form-row"><label>Query *</label><input id="tmplQuery" class="form-input" placeholder="nose job rhinoplasty" /></div>
+        <div class="form-row"><label>Name *</label><input id="tmplName" class="form-input" placeholder="e.g. product search intent" /></div>
+        <div class="form-row"><label>Query *</label><input id="tmplQuery" class="form-input" placeholder="e.g. wireless headphones" /></div>
         <div class="form-row">
-          <label>Index</label>
-          <select id="tmplIndex" class="form-input">
-            <option value="all" selected>All</option>
-            <option value="procedures">Procedures</option>
-            <option value="doctors">Doctors</option>
-            <option value="reviews">Reviews</option>
-          </select>
+          <label>Index <span style="color:var(--muted);font-size:.68rem">(ctrl/⌘ for multi)</span></label>
+          <select id="tmplIndex" class="form-input" multiple size="3"></select>
         </div>
         <div class="form-row">
           <label>Relevant IDs <span style="color:var(--muted);font-size:.68rem">(paste or import from Search marks)</span></label>
@@ -507,8 +243,11 @@
       <div class="section-title">Run Benchmark</div>
       <div class="form-card">
         <div class="form-row"><label>Run name</label><input id="benchName" class="form-input" placeholder="e.g. Round 1 cosmetic queries" /></div>
-        <div class="form-row"><label>@K (metrics cutoff)</label><input id="benchK" class="form-input" type="number" min="1" max="100" value="10" /></div>
-        <p style="font-size:.71rem;color:var(--muted);margin-bottom:6px;">Select algorithms and templates in the main panel, then run.</p>
+        <div class="form-row-2">
+          <div class="form-row" style="margin:0"><label>Fetch size</label><input id="benchSize" class="form-input" type="number" min="1" max="200" value="10" /></div>
+          <div class="form-row" style="margin:0"><label>@K (metrics cutoff)</label><input id="benchK" class="form-input" type="number" min="1" max="200" value="10" /></div>
+        </div>
+        <p style="font-size:.71rem;color:var(--muted);margin-top:4px;margin-bottom:6px;">Fetch size ≥ @K. Metrics computed over top-K only.</p>
         <button class="btn btn-green" style="width:100%;" onclick="runBenchmark()">▶ Run Benchmark</button>
       </div>
     </div>
@@ -538,19 +277,6 @@
 
     <!-- Benchmark tab -->
     <div id="expTabBenchmark" class="exp-tab-pane">
-      <!-- Metric selector -->
-      <div>
-        <div style="font-size:.72rem;color:var(--muted);margin-bottom:8px;">Display metric</div>
-        <div class="metric-selector" id="metricSelector">
-          <button class="active" onclick="setBenchMetric('ndcg_at_k')">NDCG@K</button>
-          <button onclick="setBenchMetric('mrr')">MRR</button>
-          <button onclick="setBenchMetric('precision_at_k')">Precision@K</button>
-          <button onclick="setBenchMetric('recall_at_k')">Recall@K</button>
-          <button onclick="setBenchMetric('score_separation')">Separation</button>
-          <button onclick="setBenchMetric('latency_ms')">Latency ms</button>
-          <button onclick="setBenchMetric('score_mean')">Score mean</button>
-        </div>
-      </div>
       <div id="benchTable"><div class="exp-empty">Run a benchmark to see results here.</div></div>
       <div class="run-list" id="runList"></div>
     </div>
@@ -559,781 +285,77 @@
 </div><!-- .exp-layout -->
 </div><!-- #experimentsPane -->
 
-<script>
-  // ─── State ───────────────────────────────────────────────────────────────
-  let currentMode  = 'hybrid';
-  let currentIndex = 'all';
-  let evalMode     = false;
-  let markedIds    = new Set();
-  let lastHits     = [];
+<!-- ════════════════════════ SETTINGS PANE ════════════════════════ -->
+<div id="settingsPane">
+  <main class="settings-main">
+    <div class="section-title" style="margin-bottom:14px;">Connection Profiles</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px;">
+      <button type="button" class="btn btn-primary" onclick="toggleProfileCreatePanel()">+ Add Profile</button>
+    </div>
 
-  // ─── Mode / Index selectors ──────────────────────────────────────────────
-  function setMode(m) {
-    currentMode = m;
-    document.querySelectorAll('#modeGroup button').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
-    document.getElementById('weightsSection').classList.toggle('visible', m === 'hybrid');
-  }
-
-  function setIndex(i) {
-    currentIndex = i;
-    document.querySelectorAll('#indexGroup button').forEach(b => b.classList.toggle('active', b.dataset.index === i));
-  }
-
-  // ─── Weight sliders ──────────────────────────────────────────────────────
-  function onWeightChange(changed) {
-    const bs = document.getElementById('bm25Slider');
-    const ks = document.getElementById('knnSlider');
-    if (changed === 'bm25') ks.value = 100 - parseInt(bs.value);
-    else                    bs.value = 100 - parseInt(ks.value);
-    updateWeightUI();
-  }
-
-  function resetWeights() {
-    document.getElementById('bm25Slider').value = 30;
-    document.getElementById('knnSlider').value  = 70;
-    updateWeightUI();
-  }
-
-  function updateWeightUI() {
-    const b = parseInt(document.getElementById('bm25Slider').value);
-    const k = 100 - b;
-    document.getElementById('bm25Pct').textContent = b + '%';
-    document.getElementById('knnPct').textContent  = k + '%';
-    document.getElementById('bm25Bar').style.width = b + '%';
-    document.getElementById('knnBar').style.width  = k + '%';
-  }
-
-  // ─── Filters ─────────────────────────────────────────────────────────────
-  function getFilters() {
-    const p = {};
-    const v = id => document.getElementById(id).value.trim();
-    const c = id => document.getElementById(id).checked;
-    if (v('fMinRating'))   p.min_rating   = v('fMinRating');
-    if (v('fMaxCost'))     p.max_cost_usd = v('fMaxCost');
-    if (v('fCategory'))    p.category     = v('fCategory');
-    if (v('fBodyArea'))    p.body_area    = v('fBodyArea');
-    if (c('fSurgical'))    p.is_surgical  = 'true';
-    if (v('fSpecialty'))   p.specialty    = v('fSpecialty');
-    if (v('fMinExp'))      p.min_experience = v('fMinExp');
-    if (v('fWorthIt'))     p.worth_it     = v('fWorthIt');
-    if (c('fVerified'))    p.verified     = 'true';
-    return p;
-  }
-
-  function clearFilters() {
-    ['fMinRating','fMaxCost','fCategory','fBodyArea','fSpecialty','fMinExp'].forEach(id => document.getElementById(id).value = '');
-    ['fSurgical','fVerified'].forEach(id => document.getElementById(id).checked = false);
-    document.getElementById('fWorthIt').value = '';
-    document.getElementById('activeFilters').innerHTML = '';
-  }
-
-  function renderActiveFilters(filters) {
-    const el = document.getElementById('activeFilters');
-    el.innerHTML = Object.entries(filters)
-      .map(([k, v]) => `<span class="filter-tag">${k}: ${v}</span>`).join('');
-  }
-
-  // ─── Eval mode ───────────────────────────────────────────────────────────
-  function toggleEvalMode() {
-    evalMode = document.getElementById('evalToggle').checked;
-    document.getElementById('results').classList.toggle('eval-mode', evalMode);
-    if (!evalMode) clearMarked();
-  }
-
-  function clearMarked() {
-    markedIds.clear();
-    document.querySelectorAll('.card-checkbox').forEach(cb => cb.checked = false);
-    document.querySelectorAll('.card').forEach(c => c.classList.remove('marked'));
-    updateMarkedCount();
-    document.getElementById('metricsPanel').classList.remove('visible');
-  }
-
-  function updateMarkedCount() {
-    const n = markedIds.size;
-    document.getElementById('markedCount').textContent = n;
-    document.getElementById('evalBtn').disabled = (n === 0);
-    document.getElementById('saveTemplateBtn').disabled = (n === 0);
-  }
-
-  function onCardCheck(id, checked) {
-    if (checked) markedIds.add(id);
-    else         markedIds.delete(id);
-    document.querySelector(`.card[data-id="${id}"]`)?.classList.toggle('marked', checked);
-    updateMarkedCount();
-  }
-
-  // ─── URL builder ─────────────────────────────────────────────────────────
-  function buildUrl(base) {
-    const q       = document.getElementById('q').value.trim();
-    const size    = document.getElementById('sizeSelect').value;
-    const cands   = document.getElementById('candidatesSelect').value;
-    const explain = document.getElementById('explainToggle').checked;
-    const bw      = (parseInt(document.getElementById('bm25Slider').value) / 100).toFixed(2);
-    const kw      = (1 - parseFloat(bw)).toFixed(2);
-
-    const params = new URLSearchParams({
-      q, mode: currentMode, index: currentIndex, size,
-      num_candidates: cands, explain: explain ? 'true' : 'false',
-      bm25_weight: bw, knn_weight: kw,
-    });
-    Object.entries(getFilters()).forEach(([k, v]) => params.set(k, v));
-    return `${base}?${params}`;
-  }
-
-  // ─── Main search ─────────────────────────────────────────────────────────
-  document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
-
-  async function doSearch() {
-    const q = document.getElementById('q').value.trim();
-    if (!q) return;
-    setError(null);
-    setLoading(true);
-    document.getElementById('results').innerHTML = '';
-    document.getElementById('meta').innerHTML = '';
-    document.getElementById('metricsPanel').classList.remove('visible');
-
-    try {
-      const t0  = performance.now();
-      const res = await fetch(buildUrl('/api/v1/search'));
-      const ms  = Math.round(performance.now() - t0);
-      if (!res.ok) throw new Error((await res.json().catch(() => ({detail: res.statusText}))).detail);
-      const data = await res.json();
-      setLoading(false);
-      lastHits = data.hits;
-      renderMeta(data, ms);
-      renderActiveFilters(data.filters || {});
-      renderResults(data.hits, document.getElementById('explainToggle').checked, data.mode);
-    } catch(e) {
-      setLoading(false);
-      setError(e.message);
-    }
-  }
-
-  // ─── Eval run ────────────────────────────────────────────────────────────
-  async function runEval() {
-    const q = document.getElementById('q').value.trim();
-    if (!q || markedIds.size === 0) return;
-    setError(null);
-    setLoading(true);
-
-    const bw = (parseInt(document.getElementById('bm25Slider').value) / 100).toFixed(2);
-    const kw = (1 - parseFloat(bw)).toFixed(2);
-
-    const body = {
-      query: q,
-      relevant_ids: [...markedIds],
-      mode: currentMode,
-      index: currentIndex,
-      k: parseInt(document.getElementById('sizeSelect').value),
-      bm25_weight: parseFloat(bw),
-      knn_weight: parseFloat(kw),
-      num_candidates: parseInt(document.getElementById('candidatesSelect').value),
-    };
-
-    try {
-      const res  = await fetch('/api/v1/eval', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({detail: res.statusText}))).detail);
-      const data = await res.json();
-      setLoading(false);
-      renderMetrics(data);
-      // Re-render hits, highlight relevant positions
-      renderResults(data.hits, false, currentMode, new Set(data.relevant_positions.map(p => p - 1)));
-    } catch(e) {
-      setLoading(false);
-      setError(e.message);
-    }
-  }
-
-  // ─── Render helpers ──────────────────────────────────────────────────────
-  function setLoading(on) { document.getElementById('spinner').classList.toggle('active', on); }
-
-  function setError(msg) {
-    const el = document.getElementById('errorBanner');
-    el.classList.toggle('visible', !!msg);
-    el.textContent = msg || '';
-  }
-
-  function renderMeta(data, ms) {
-    const modeStr  = `<strong>${data.mode}</strong>`;
-    const indexStr = `<strong>${data.index}</strong>`;
-    document.getElementById('meta').innerHTML =
-      `<strong>${data.total.toLocaleString()}</strong> docs · ${data.hits.length} shown · ${modeStr} · ${indexStr} · <strong>${ms}ms</strong>`;
-  }
-
-  function renderMetrics(data) {
-    const m = data.metrics;
-    document.getElementById('mNDCG').textContent      = m.ndcg_at_k.toFixed(3);
-    document.getElementById('mMRR').textContent       = m.mrr.toFixed(3);
-    document.getElementById('mPrecision').textContent = m.precision_at_k.toFixed(3);
-    document.getElementById('mRecall').textContent    = m.recall_at_k.toFixed(3);
-
-    const posHtml = data.relevant_positions.map(p =>
-      `<span class="pos-badge">#${p}</span>`).join('');
-    document.getElementById('metricInfo').innerHTML =
-      `Found <strong>${data.relevant_found}</strong> of <strong>${data.relevant_provided}</strong> relevant docs &nbsp;|&nbsp; positions: ${posHtml}`;
-    document.getElementById('metricsPanel').classList.add('visible');
-  }
-
-  // ─── Index type extractor ─────────────────────────────────────────────────
-  function indexType(s) {
-    if (s.includes('procedures')) return 'procedures';
-    if (s.includes('doctors'))   return 'doctors';
-    if (s.includes('reviews'))   return 'reviews';
-    return '';
-  }
-
-  function esc(s) {
-    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  }
-
-  function stars(n) {
-    const f = Math.round(n || 0);
-    return '★'.repeat(f) + '☆'.repeat(Math.max(0, 5 - f));
-  }
-
-  function row(label, val) {
-    if (val == null || val === '') return '';
-    const safeVal = typeof val === 'string' && val.startsWith('<') ? val : esc(val);
-    return `<div class="card-field"><strong>${label}:</strong> ${safeVal}</div>`;
-  }
-
-  // ─── Score breakdown renderer ─────────────────────────────────────────────
-  function renderBreakdown(bd, mode) {
-    if (!bd) return '';
-    if (mode === 'rrf') {
-      return `<div class="breakdown">
-        <div class="breakdown-title">RRF Breakdown</div>
-        <div class="rrf-grid">
-          <div class="rrf-cell">BM25 rank: <strong>#${bd.bm25_rank ?? '—'}</strong></div>
-          <div class="rrf-cell">KNN rank: <strong>#${bd.knn_rank ?? '—'}</strong></div>
-          <div class="rrf-cell">RRF(bm25): <strong>${bd.rrf_bm25?.toFixed(5) ?? '—'}</strong></div>
-          <div class="rrf-cell">RRF(knn): <strong>${bd.rrf_knn?.toFixed(5) ?? '—'}</strong></div>
-        </div>
-      </div>`;
-    }
-
-    // Hybrid breakdown with bars
-    const bm25n = bd.bm25_normalized ?? 0;
-    const knnn  = bd.knn_normalized  ?? bd.knn_cosine ?? 0;
-    const comb  = (bd.bm25_contribution ?? 0) + (bd.knn_contribution ?? 0);
-
-    return `<div class="breakdown">
-      <div class="breakdown-title">Score Breakdown (explain)</div>
-      <div class="breakdown-bars">
-        <div class="bk-row">
-          <div class="bk-label">BM25 raw → norm</div>
-          <div class="bk-bar-wrap"><div class="bk-bar bk-bm25" style="width:${bm25n*100}%"></div></div>
-          <div class="bk-val">${bm25n.toFixed(3)}</div>
-        </div>
-        <div class="bk-row">
-          <div class="bk-label">KNN cosine → norm</div>
-          <div class="bk-bar-wrap"><div class="bk-bar bk-knn" style="width:${knnn*100}%"></div></div>
-          <div class="bk-val">${knnn.toFixed(3)}</div>
-        </div>
-        <div class="bk-row">
-          <div class="bk-label">Combined score</div>
-          <div class="bk-bar-wrap"><div class="bk-bar bk-combined" style="width:${comb*100}%"></div></div>
-          <div class="bk-val">${comb.toFixed(3)}</div>
+    <div id="profileCreatePanel" class="form-card profile-create-panel profile-panel-hidden">
+      <h3>New profile</h3>
+      <div class="form-row"><label>Name *</label><input id="pc_name" class="form-input" placeholder="e.g. Local Dev" autocomplete="off" /></div>
+      <h3 style="margin-top:12px;">OpenSearch</h3>
+      <div class="form-row-2">
+        <div class="form-row" style="margin:0"><label>Host</label><input id="pc_host" class="form-input" placeholder="localhost" /></div>
+        <div class="form-row" style="margin:0"><label>Port</label><input id="pc_port" class="form-input" type="number" min="1" max="65535" value="9200" /></div>
+      </div>
+      <div class="field-row" style="margin-top:6px;"><label>Use SSL</label><input type="checkbox" id="pc_use_ssl" /></div>
+      <div class="form-row"><label>Auth type</label>
+        <select id="pc_auth_type" class="form-input" onchange="syncProfileAuthVisibility('pc')">
+          <option value="none">none</option>
+          <option value="basic">basic</option>
+          <option value="aws_signature_v4">aws_signature_v4</option>
+        </select>
+      </div>
+      <div id="pc_auth_basic" class="profile-cond">
+        <div class="form-row-2">
+          <div class="form-row" style="margin:0"><label>Username</label><input id="pc_username" class="form-input" autocomplete="off" /></div>
+          <div class="form-row" style="margin:0"><label>Password</label><input id="pc_password" class="form-input" type="password" autocomplete="new-password" /></div>
         </div>
       </div>
-    </div>`;
-  }
-
-  // ─── Card renderer ────────────────────────────────────────────────────────
-  function renderCard(hit, explain, mode, relevantIdxSet, position) {
-    const type = indexType(hit.index);
-    const s    = hit.source;
-    const sc   = hit.score;
-
-    const isRelevant = relevantIdxSet && relevantIdxSet.has(position);
-    const isMarked   = markedIds.has(hit.id);
-
-    let title  = esc(s.name || s.title || s.doctor_name || '—');
-    let fields = '';
-    let desc   = '';
-    let tagsHtml = '';
-
-    if (type === 'procedures') {
-      fields = row('Category', s.category) + row('Body area', s.body_area) +
-               row('Rating',   s.average_rating ? `<span class="stars">${stars(s.average_rating)}</span> ${s.average_rating}` : '') +
-               row('Cost',     s.average_cost_usd ? `$${s.average_cost_usd.toLocaleString()}` : '') +
-               row('Recovery', s.recovery_days ? `${s.recovery_days} days` : '') +
-               row('Surgical', s.is_surgical != null ? (s.is_surgical ? 'Yes' : 'No') : '');
-      desc = s.description || '';
-      if (s.tags?.length) tagsHtml = `<div class="tags">${(Array.isArray(s.tags) ? s.tags : String(s.tags).split(' ')).map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>`;
-
-    } else if (type === 'doctors') {
-      fields = row('Specialty', s.specialty) +
-               row('Location', [s.city, s.state].filter(Boolean).join(', ')) +
-               row('Rating',   s.average_rating ? `<span class="stars">${stars(s.average_rating)}</span> ${s.average_rating}` : '') +
-               row('Experience', s.years_experience ? `${s.years_experience} yrs` : '') +
-               row('Reviews', s.review_count);
-      desc = s.bio || '';
-      if (s.certifications?.length) tagsHtml = `<div class="tags">${s.certifications.map(c => `<span class="tag">${esc(c)}</span>`).join('')}</div>`;
-
-    } else if (type === 'reviews') {
-      fields = row('Procedure', s.procedure_name) + row('Doctor', s.doctor_name) +
-               row('Rating',   s.rating ? `<span class="stars">${stars(s.rating)}</span>` : '') +
-               row('Worth it', s.worth_it) + row('Verified', s.verified ? '✓ Yes' : '');
-      desc = s.content || '';
-    }
-
-    const scoreBadge = sc > 1
-      ? `<span class="score-badge">${sc.toFixed(2)}</span>`
-      : `<span class="score-badge">${sc.toFixed(4)}</span>`;
-
-    const breakdownHtml = (explain && hit.score_breakdown) ? renderBreakdown(hit.score_breakdown, mode) : '';
-
-    const relevantBadge = isRelevant ? `<div class="rank-badge">#${position + 1}</div>` : '';
-
-    return `
-      <div class="card ${isRelevant ? 'relevant' : ''} ${isMarked ? 'marked' : ''}" data-id="${hit.id}">
-        ${relevantBadge}
-        <span class="index-tag ${type}">${type || hit.index.split('_')[1]}</span>
-        <div class="card-top">
-          <input type="checkbox" class="card-checkbox" ${isMarked ? 'checked' : ''}
-            onchange="onCardCheck('${hit.id}', this.checked)" />
-          <div class="card-title">${title}</div>
-          ${scoreBadge}
+      <div id="pc_auth_aws" class="profile-cond">
+        <div class="form-row"><label>AWS Region</label><input id="pc_aws_region" class="form-input" placeholder="us-east-1" /></div>
+        <div class="form-row-2">
+          <div class="form-row" style="margin:0"><label>Access Key ID</label><input id="pc_aws_access_key_id" class="form-input" autocomplete="off" /></div>
+          <div class="form-row" style="margin:0"><label>Secret Access Key</label><input id="pc_aws_secret_access_key" class="form-input" type="password" autocomplete="new-password" /></div>
         </div>
-        <div class="card-body">${fields}</div>
-        ${desc ? `<div class="card-desc">${esc(desc)}</div>` : ''}
-        ${tagsHtml}
-        ${breakdownHtml}
-      </div>`;
-  }
-
-  function renderResults(hits, explain, mode, relevantIdxSet) {
-    const container = document.getElementById('results');
-    container.className = evalMode ? 'eval-mode' : '';
-    if (!hits.length) {
-      container.innerHTML = `<div class="empty"><div class="icon">🔍</div>No results found.</div>`;
-      return;
-    }
-    container.innerHTML = hits.map((h, i) => renderCard(h, explain, mode, relevantIdxSet, i)).join('');
-  }
-
-  // Init
-  updateWeightUI();
-
-  // ════════════════════════════ EXPERIMENTS ════════════════════════════════
-
-  // ─── State ───────────────────────────────────────────────────────────────
-  let algorithms = [];
-  let templates  = [];
-  let runs       = [];
-  let activeRun  = null;
-  let benchMetric = 'ndcg_at_k';
-  let selectedAlgoIds = new Set();
-  let selectedTmplIds = new Set();
-  let relIds = [];          // working list for template form
-  let currentExpTab = 'algorithms';
-
-  // ─── Pane switcher ───────────────────────────────────────────────────────
-  function showPane(name) {
-    const isExp = name === 'experiments';
-    document.getElementById('searchPane').style.display      = isExp ? 'none' : 'block';
-    document.getElementById('experimentsPane').classList.toggle('visible', isExp);
-    document.querySelectorAll('.tab-nav button').forEach((b, i) =>
-      b.classList.toggle('active', (i === 0) !== isExp)
-    );
-    if (isExp) refreshExpData();
-  }
-
-  // ─── Sub-tab switcher ────────────────────────────────────────────────────
-  function showExpTab(tab) {
-    currentExpTab = tab;
-    document.querySelectorAll('.sub-tab-btn').forEach((b, i) => {
-      const tabs = ['algorithms', 'templates', 'benchmark'];
-      b.classList.toggle('active', tabs[i] === tab);
-    });
-    ['algorithms', 'templates', 'benchmark'].forEach(t => {
-      document.getElementById('expTab' + cap(t)).classList.toggle('visible', t === tab);
-      const side = document.getElementById('expSide' + cap(t));
-      if (side) side.style.display = t === tab ? 'block' : 'none';
-    });
-  }
-  function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
-
-  // ─── Utility ─────────────────────────────────────────────────────────────
-  function expSetLoading(on) { document.getElementById('expSpinner').classList.toggle('active', on); }
-  function expSetError(msg) {
-    const el = document.getElementById('expError');
-    el.classList.toggle('visible', !!msg);
-    el.textContent = msg || '';
-  }
-  async function apiFetch(url, opts = {}) {
-    const r = await fetch(url, { headers: {'Content-Type': 'application/json'}, ...opts });
-    if (!r.ok) { const e = await r.json().catch(() => ({detail: r.statusText})); throw new Error(e.detail || r.statusText); }
-    if (r.status === 204) return null;
-    return r.json();
-  }
-
-  // ─── Refresh all data ────────────────────────────────────────────────────
-  async function refreshExpData() {
-    try {
-      expSetLoading(true);
-      [algorithms, templates, runs] = await Promise.all([
-        apiFetch('/api/v1/experiments/algorithms'),
-        apiFetch('/api/v1/experiments/templates'),
-        apiFetch('/api/v1/experiments/benchmark'),
-      ]);
-      renderAlgorithms();
-      renderTemplates();
-      renderRunList();
-      if (activeRun) {
-        const full = await apiFetch(`/api/v1/experiments/benchmark/${activeRun.id}`).catch(() => null);
-        if (full) { activeRun = full; renderBenchTable(); }
-      }
-    } catch(e) { expSetError(e.message); }
-    finally   { expSetLoading(false); }
-  }
-
-  // ─── Algorithms ──────────────────────────────────────────────────────────
-  function renderAlgorithms() {
-    const el = document.getElementById('algoList');
-    if (!algorithms.length) { el.innerHTML = '<div class="exp-empty">No algorithms yet.</div>'; return; }
-    el.innerHTML = '<div class="entity-list">' + algorithms.map(a => `
-      <div class="entity-card ${selectedAlgoIds.has(a.id) ? 'selected' : ''}" id="algo-${a.id}">
-        <input type="checkbox" class="entity-checkbox"
-          ${selectedAlgoIds.has(a.id) ? 'checked' : ''}
-          onchange="toggleAlgoSel('${a.id}', this.checked)" />
-        <div class="entity-info">
-          <div class="entity-name">${esc(a.name)}</div>
-          <div class="entity-meta">
-            <span class="e-chip">${a.mode}</span>
-            ${a.mode==='hybrid' ? `<span class="e-chip">BM25 ${a.bm25_weight} / KNN ${a.knn_weight}</span>` : ''}
-            <span class="e-chip">${a.index}</span>
-            <span class="e-chip">k=${a.num_candidates}</span>
-            ${a.description ? `<span style="color:var(--muted)">${esc(a.description)}</span>` : ''}
-          </div>
-        </div>
-        <div class="entity-actions">
-          <button class="btn btn-danger btn-sm" onclick="deleteAlgorithm('${a.id}')">✕</button>
-        </div>
-      </div>`).join('') + '</div>';
-  }
-
-  function toggleAlgoSel(id, checked) {
-    if (checked) selectedAlgoIds.add(id);
-    else         selectedAlgoIds.delete(id);
-    document.getElementById('algo-' + id)?.classList.toggle('selected', checked);
-  }
-
-  async function createAlgorithm() {
-    const name = document.getElementById('algoName').value.trim();
-    if (!name) { expSetError('Algorithm name is required.'); return; }
-    expSetError(null);
-    try {
-      expSetLoading(true);
-      const body = {
-        name,
-        description: document.getElementById('algoDesc').value.trim(),
-        mode:         document.getElementById('algoMode').value,
-        bm25_weight:  parseFloat(document.getElementById('algoBm25').value),
-        knn_weight:   parseFloat(document.getElementById('algoKnn').value),
-        num_candidates: parseInt(document.getElementById('algoCands').value),
-        index:        document.getElementById('algoIndex').value,
-        filters:      {},
-      };
-      const algo = await apiFetch('/api/v1/experiments/algorithms', { method: 'POST', body: JSON.stringify(body) });
-      algorithms.unshift(algo);
-      document.getElementById('algoName').value = '';
-      document.getElementById('algoDesc').value = '';
-      renderAlgorithms();
-    } catch(e) { expSetError(e.message); }
-    finally    { expSetLoading(false); }
-  }
-
-  async function deleteAlgorithm(id) {
-    if (!confirm('Delete this algorithm?')) return;
-    try {
-      await apiFetch(`/api/v1/experiments/algorithms/${id}`, { method: 'DELETE' });
-      algorithms = algorithms.filter(a => a.id !== id);
-      selectedAlgoIds.delete(id);
-      renderAlgorithms();
-    } catch(e) { expSetError(e.message); }
-  }
-
-  // ─── Templates ───────────────────────────────────────────────────────────
-  function renderTemplates() {
-    const el = document.getElementById('tmplList');
-    if (!templates.length) { el.innerHTML = '<div class="exp-empty">No templates yet.</div>'; return; }
-    el.innerHTML = '<div class="entity-list">' + templates.map(t => `
-      <div class="entity-card ${selectedTmplIds.has(t.id) ? 'selected' : ''}" id="tmpl-${t.id}">
-        <input type="checkbox" class="entity-checkbox"
-          ${selectedTmplIds.has(t.id) ? 'checked' : ''}
-          onchange="toggleTmplSel('${t.id}', this.checked)" />
-        <div class="entity-info">
-          <div class="entity-name">${esc(t.name)}</div>
-          <div class="entity-meta">
-            <span class="e-chip">"${esc(t.query)}"</span>
-            <span class="e-chip">${t.index}</span>
-            <span class="e-chip">${t.relevant_ids.length} relevant</span>
-            ${t.notes ? `<span style="color:var(--muted)">${esc(t.notes)}</span>` : ''}
-          </div>
-        </div>
-        <div class="entity-actions">
-          <button class="btn btn-danger btn-sm" onclick="deleteTemplate('${t.id}')">✕</button>
-        </div>
-      </div>`).join('') + '</div>';
-  }
-
-  function toggleTmplSel(id, checked) {
-    if (checked) selectedTmplIds.add(id);
-    else         selectedTmplIds.delete(id);
-    document.getElementById('tmpl-' + id)?.classList.toggle('selected', checked);
-  }
-
-  // ─── Relevant IDs editor ─────────────────────────────────────────────────
-  function renderRelIds() {
-    const box = document.getElementById('relIdsBox');
-    const inp = document.getElementById('relIdsInput');
-    box.querySelectorAll('.rel-id-chip').forEach(c => c.remove());
-    relIds.forEach((id, i) => {
-      const chip = document.createElement('span');
-      chip.className = 'rel-id-chip';
-      chip.innerHTML = `${esc(id.slice(0, 8))}… <button onclick="removeRelId(${i})">×</button>`;
-      box.insertBefore(chip, inp);
-    });
-  }
-  function removeRelId(i) { relIds.splice(i, 1); renderRelIds(); }
-  function onRelIdKey(e) {
-    if (e.key === 'Enter' || e.key === ',') {
-      e.preventDefault();
-      const val = e.target.value.trim().replace(/,/g, '');
-      if (val && !relIds.includes(val)) { relIds.push(val); renderRelIds(); }
-      e.target.value = '';
-    }
-  }
-  function importMarkedIds() {
-    markedIds.forEach(id => { if (!relIds.includes(id)) relIds.push(id); });
-    renderRelIds();
-    expSetError(null);
-  }
-
-  async function createTemplate() {
-    const name  = document.getElementById('tmplName').value.trim();
-    const query = document.getElementById('tmplQuery').value.trim();
-    if (!name || !query) { expSetError('Name and query are required.'); return; }
-    // also grab any text still in the input
-    const inp = document.getElementById('relIdsInput').value.trim();
-    if (inp) { relIds.push(inp); document.getElementById('relIdsInput').value = ''; }
-    expSetError(null);
-    try {
-      expSetLoading(true);
-      const body = {
-        name, query,
-        index:        document.getElementById('tmplIndex').value,
-        relevant_ids: [...relIds],
-        notes:        document.getElementById('tmplNotes').value.trim(),
-      };
-      const tmpl = await apiFetch('/api/v1/experiments/templates', { method: 'POST', body: JSON.stringify(body) });
-      templates.unshift(tmpl);
-      document.getElementById('tmplName').value  = '';
-      document.getElementById('tmplQuery').value = '';
-      document.getElementById('tmplNotes').value = '';
-      relIds = [];
-      renderRelIds();
-      renderTemplates();
-    } catch(e) { expSetError(e.message); }
-    finally    { expSetLoading(false); }
-  }
-
-  async function deleteTemplate(id) {
-    if (!confirm('Delete this template?')) return;
-    try {
-      await apiFetch(`/api/v1/experiments/templates/${id}`, { method: 'DELETE' });
-      templates = templates.filter(t => t.id !== id);
-      selectedTmplIds.delete(id);
-      renderTemplates();
-    } catch(e) { expSetError(e.message); }
-  }
-
-  // ─── Save as Template from Search tab ────────────────────────────────────
-  async function saveAsTemplate() {
-    if (markedIds.size === 0) return;
-    const q = document.getElementById('q').value.trim();
-    const name = prompt('Template name:', q ? `"${q}"` : 'My template');
-    if (!name) return;
-    try {
-      const body = {
-        name,
-        query: q || name,
-        index: currentIndex,
-        relevant_ids: [...markedIds],
-        notes: 'Saved from Search tab',
-      };
-      await apiFetch('/api/v1/experiments/templates', { method: 'POST', body: JSON.stringify(body) });
-      alert(`Template "${name}" saved with ${markedIds.size} relevant IDs.`);
-    } catch(e) { alert('Error: ' + e.message); }
-  }
-
-  // ─── Benchmark ───────────────────────────────────────────────────────────
-  function setBenchMetric(m) {
-    benchMetric = m;
-    document.querySelectorAll('#metricSelector button').forEach(b =>
-      b.classList.toggle('active', b.textContent.toLowerCase().includes(m.replace(/_/g,' ').replace('@k','@k')))
-    );
-    if (activeRun) renderBenchTable();
-  }
-
-  async function runBenchmark() {
-    if (selectedAlgoIds.size === 0) { expSetError('Select at least one algorithm.'); return; }
-    if (selectedTmplIds.size === 0) { expSetError('Select at least one template.'); return; }
-    expSetError(null);
-    expSetLoading(true);
-    try {
-      const body = {
-        name:          document.getElementById('benchName').value.trim(),
-        algorithm_ids: [...selectedAlgoIds],
-        template_ids:  [...selectedTmplIds],
-        k:             parseInt(document.getElementById('benchK').value),
-      };
-      const run = await apiFetch('/api/v1/experiments/benchmark', { method: 'POST', body: JSON.stringify(body) });
-      runs.unshift(run);
-      activeRun = run;
-      renderRunList();
-      await loadRunDetail(run.id);
-    } catch(e) { expSetError(e.message); }
-    finally    { expSetLoading(false); }
-  }
-
-  async function loadRunDetail(id) {
-    try {
-      expSetLoading(true);
-      activeRun = await apiFetch(`/api/v1/experiments/benchmark/${id}`);
-      renderBenchTable();
-      showExpTab('benchmark');
-    } catch(e) { expSetError(e.message); }
-    finally    { expSetLoading(false); }
-  }
-
-  async function deleteRun(id) {
-    if (!confirm('Delete this benchmark run?')) return;
-    try {
-      await apiFetch(`/api/v1/experiments/benchmark/${id}`, { method: 'DELETE' });
-      runs = runs.filter(r => r.id !== id);
-      if (activeRun?.id === id) { activeRun = null; document.getElementById('benchTable').innerHTML = '<div class="exp-empty">Run a benchmark to see results here.</div>'; }
-      renderRunList();
-    } catch(e) { expSetError(e.message); }
-  }
-
-  function renderRunList() {
-    const el = document.getElementById('runList');
-    if (!runs.length) { el.innerHTML = ''; return; }
-    el.innerHTML = `<div class="section-title" style="margin-bottom:8px;">Past Runs</div>` +
-      runs.map(r => `
-        <div class="run-item ${activeRun?.id === r.id ? 'active-run' : ''}" onclick="loadRunDetail('${r.id}')">
-          <div class="run-info">
-            <div class="run-name">${esc(r.name || 'Untitled run')}</div>
-            <div class="run-meta">${r.algorithm_ids.length} algos × ${r.template_ids.length} templates · @${r.k} · ${new Date(r.created_at).toLocaleString()}</div>
-          </div>
-          <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteRun('${r.id}')">✕</button>
-        </div>`).join('');
-  }
-
-  // ─── Benchmark table renderer ─────────────────────────────────────────────
-  function renderBenchTable() {
-    const run = activeRun;
-    if (!run || !run.results) return;
-
-    const algoIds = run.algorithm_ids;
-    const tmplIds = run.template_ids;
-
-    // Build lookup maps
-    const algoMap = Object.fromEntries(algorithms.map(a => [a.id, a]));
-    const tmplMap = Object.fromEntries(templates.map(t => [t.id, t]));
-
-    // Collect per-cell values for coloring
-    const isLatency = benchMetric === 'latency_ms';
-    const isSep = benchMetric === 'score_separation';
-
-    // Per-template column values (all algos) for best/worst highlighting
-    const colVals = {};
-    tmplIds.forEach(tid => {
-      colVals[tid] = algoIds.map(aid => {
-        const tr = run.results[aid]?.[tid];
-        return tr ? (tr[benchMetric] ?? null) : null;
-      }).filter(v => v !== null);
-    });
-    // Summary column values
-    const sumVals = algoIds.map(aid => {
-      const s = run.summary[aid];
-      const key = 'avg_' + benchMetric;
-      return s ? (s[key] ?? null) : null;
-    }).filter(v => v !== null);
-
-    // Header
-    const tmplHeaders = tmplIds.map(tid => {
-      const t = tmplMap[tid];
-      return `<th title="${esc(t?.name || tid)}">${esc((t?.name || tid).slice(0, 18))}…</th>`;
-    }).join('');
-
-    // Rows
-    const rows = algoIds.map(aid => {
-      const a = algoMap[aid];
-      const cells = tmplIds.map(tid => {
-        const tr = run.results[aid]?.[tid];
-        if (!tr) return '<td>—</td>';
-        const raw = tr[benchMetric] ?? null;
-        if (raw === null) return '<td>—</td>';
-        const cv = colVals[tid];
-        const isBest  = !isLatency && raw === Math.max(...cv);
-        const isWorst = !isLatency && raw === Math.min(...cv);
-        const isLatBest  = isLatency && raw === Math.min(...cv);
-        const isLatWorst = isLatency && raw === Math.max(...cv);
-        const cls = isBest || isLatBest ? 'cell-best' : isWorst || isLatWorst ? 'cell-worst' : isSep ? 'cell-sep' : isLatency ? 'cell-latency' : '';
-        const fmt = isLatency ? raw + 'ms' : raw.toFixed(4);
-        const barW = isLatency ? 0 : Math.round(raw * 100);
-        return `<td><div class="cell-val ${cls}">${fmt}</div><div class="metric-bar" style="width:${barW}%;opacity:.5"></div></td>`;
-      }).join('');
-
-      const s = run.summary[aid];
-      const sumKey = 'avg_' + benchMetric;
-      const sumRaw = s ? (s[sumKey] ?? null) : null;
-      const sumFmt = sumRaw === null ? '—' : isLatency ? sumRaw.toFixed(0) + 'ms' : sumRaw.toFixed(4);
-      const isSumBest  = sumRaw !== null && (!isLatency ? sumRaw === Math.max(...sumVals) : sumRaw === Math.min(...sumVals));
-      const isSumWorst = sumRaw !== null && (!isLatency ? sumRaw === Math.min(...sumVals) : sumRaw === Math.max(...sumVals));
-      const sumCls = isSumBest ? 'cell-best' : isSumWorst ? 'cell-worst' : '';
-
-      return `<tr>
-        <td class="cell-algo" title="${esc(a?.name || aid)}">${esc((a?.name || aid).slice(0, 24))}</td>
-        ${cells}
-        <td class="cell-summary"><span class="${sumCls}">${sumFmt}</span></td>
-      </tr>`;
-    }).join('');
-
-    // Metric label
-    const metricLabels = {
-      ndcg_at_k: 'NDCG@K', mrr: 'MRR', precision_at_k: 'Precision@K',
-      recall_at_k: 'Recall@K', score_separation: 'Score Separation',
-      latency_ms: 'Latency (ms)', score_mean: 'Score Mean',
-    };
-
-    document.getElementById('benchTable').innerHTML = `
-      <div style="margin-bottom:10px;font-size:.8rem;color:var(--muted);">
-        <strong style="color:var(--text)">${esc(run.name || 'Untitled run')}</strong>
-        &nbsp;·&nbsp; @K=${run.k}
-        &nbsp;·&nbsp; metric: <strong style="color:var(--accent2)">${metricLabels[benchMetric] || benchMetric}</strong>
-        &nbsp;·&nbsp; <span style="color:var(--green)">green</span> = best
-        &nbsp;·&nbsp; <span style="color:var(--red)">red</span> = worst
       </div>
-      <div class="bench-table-wrap">
-        <table class="bench-table">
-          <thead>
-            <tr>
-              <th>Algorithm</th>
-              ${tmplHeaders}
-              <th>AVG</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>`;
+      <h3 style="margin-top:12px;">Embedding</h3>
+      <div class="form-row"><label>Provider</label>
+        <select id="pc_embed_provider" class="form-input" onchange="syncProfileEmbedVisibility('pc')">
+          <option value="local_sentence_transformers">local_sentence_transformers</option>
+          <option value="aws_bedrock">aws_bedrock</option>
+        </select>
+      </div>
+      <div id="pc_embed_local" class="profile-cond visible">
+        <div class="form-row"><label>Model name</label><input id="pc_model_name" class="form-input" value="all-MiniLM-L6-v2" /></div>
+      </div>
+      <div id="pc_embed_bedrock" class="profile-cond">
+        <div class="form-row"><label>Model name</label><input id="pc_bedrock_model_name" class="form-input" placeholder="e.g. amazon.titan-embed-text-v1" /></div>
+        <div class="form-row"><label>AWS Region</label><input id="pc_embed_aws_region" class="form-input" /></div>
+        <div class="form-row-2">
+          <div class="form-row" style="margin:0"><label>Access Key ID</label><input id="pc_embed_aws_access_key_id" class="form-input" autocomplete="off" /></div>
+          <div class="form-row" style="margin:0"><label>Secret Access Key</label><input id="pc_embed_aws_secret_access_key" class="form-input" type="password" autocomplete="new-password" /></div>
+        </div>
+      </div>
+      <h3 style="margin-top:12px;">Indices</h3>
+      <div class="indices-header"><span>Logical key</span><span>Physical index name</span><span>BM25 fields (comma-sep)</span><span></span></div>
+      <div id="pc_indices_list"></div>
+      <button type="button" class="btn btn-ghost btn-sm" style="margin-bottom:8px;" onclick="addIndexRow('pc')">+ Add index</button>
+      <div style="display:flex;gap:8px;margin-top:4px;">
+        <button type="button" class="btn btn-primary" onclick="submitProfileCreate()">Create profile</button>
+        <button type="button" class="btn btn-ghost" onclick="hideProfileCreatePanel()">Cancel</button>
+      </div>
+    </div>
 
-    renderRunList(); // refresh active highlight
-  }
-</script>
+    <div class="error-banner" id="profileError"></div>
+    <div class="spinner" id="profileSpinner"></div>
+    <div id="profileList"><div class="exp-empty">Open Settings to load profiles.</div></div>
+  </main>
+</div><!-- #settingsPane -->
+
+  <script src="/js/app.js"></script>
 </body>
 </html>

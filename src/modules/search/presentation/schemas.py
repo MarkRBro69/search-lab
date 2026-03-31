@@ -6,8 +6,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-# OpenSearch _source values: primitives and homogeneous lists (no nested dicts in our indices)
-DocumentField = str | int | float | bool | list[str] | list[int] | list[float] | None
+from src.shared.search_mode import SearchMode  # noqa: TC001
+
+# OpenSearch _source values: primitives, homogeneous lists, and nested objects
+DocumentField = (
+    str | int | float | bool | list[str] | list[int] | list[float] | dict[str, object] | None
+)
 
 # ---------------------------------------------------------------------------
 # OpenSearch native explain tree
@@ -78,7 +82,7 @@ class SearchParamsEcho(BaseModel):
 
 class SearchResponse(BaseModel):
     query: str = Field(..., description="Original search query")
-    mode: str = Field(..., description="Mode used: bm25 | semantic | hybrid | rrf")
+    mode: SearchMode = Field(..., description="Mode used: bm25 | semantic | hybrid | rrf")
     index: str = Field(..., description="Collection searched")
     total: int = Field(..., description="Total matching documents")
     hits: list[SearchHit] = Field(..., description="Ranked result list")
@@ -126,19 +130,22 @@ class RankEvalRequest(BaseModel):
     """Batch ranking evaluation via OpenSearch _rank_eval API (BM25 queries only)."""
 
     queries: list[RankEvalQuery] = Field(..., min_length=1)
-    index: str = Field("procedures", description="procedures | doctors | reviews  (not 'all')")
+    index: str = Field(
+        ...,
+        description="Single logical index key from the profile (not `all` — ratings target one physical index)",
+    )
     k: int = Field(10, ge=1, le=50, description="Evaluate top-K results")
-    metric: Literal["dcg", "ndcg", "precision", "recall", "mean_reciprocal_rank"] = Field(
-        "ndcg",
-        description="Ranking metric to compute",
+    metric: Literal["dcg", "precision", "recall", "mean_reciprocal_rank"] = Field(
+        "dcg",
+        description="Ranking metric to compute via OpenSearch _rank_eval (ndcg and expected_reciprocal_rank are not supported by OpenSearch)",
     )
 
     @model_validator(mode="after")
     def _validate_index_not_all(self) -> RankEvalRequest:
         if self.index == "all":
             raise ValueError(
-                "rank_eval requires a specific index (procedures | doctors | reviews). "
-                "'all' is not supported because relevance ratings need a single target index."
+                "rank_eval requires a single logical index key, not 'all', "
+                "because relevance ratings must target one physical index."
             )
         return self
 
@@ -148,15 +155,15 @@ class RankEvalRequest(BaseModel):
                 {
                     "queries": [
                         {
-                            "id": "rhinoplasty",
-                            "query": "rhinoplasty nose reshaping",
+                            "id": "example-query",
+                            "query": "example search query",
                             "ratings": [
-                                {"doc_id": "0ec37382-9f2b-447e-b5b6-b60e965a9a7b", "rating": 3},
-                                {"doc_id": "1cf6bd12-f08e-4bb4-b654-7fa22239b0ea", "rating": 1},
+                                {"doc_id": "00000000-0000-0000-0000-000000000001", "rating": 3},
+                                {"doc_id": "00000000-0000-0000-0000-000000000002", "rating": 1},
                             ],
                         }
                     ],
-                    "index": "procedures",
+                    "index": "my-index",
                     "k": 10,
                     "metric": "ndcg",
                 }

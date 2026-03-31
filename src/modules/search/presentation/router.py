@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from opensearchpy import NotFoundError, OpenSearch
+from fastapi import APIRouter, Depends, Query
+from opensearchpy.exceptions import NotFoundError as OpenSearchNotFoundError
+from opensearchpy.exceptions import TransportError
 
+from src.modules.profiles.api import ActiveProfileBundle, get_active_profile_bundle
 from src.modules.search.application.search_params import SearchParams
 from src.modules.search.application.search_service import explain_document_async, search
 from src.modules.search.presentation.schemas import (
@@ -14,16 +16,20 @@ from src.modules.search.presentation.schemas import (
     OsExplanationNode,
     SearchResponse,
 )
-from src.shared.infrastructure.opensearch import get_client
+from src.shared.exceptions import (
+    DOCUMENT_NOT_FOUND,
+    SEARCH_UNAVAILABLE,
+    InvalidInputError,
+    ServiceUnavailableError,
+)
+from src.shared.exceptions import (
+    NotFoundError as DocumentNotFoundAppError,
+)
+from src.shared.search_mode import SearchMode
 
 router = APIRouter(prefix="/search", tags=["search"])
 
-
-def _os_client() -> OpenSearch:
-    return get_client()
-
-
-OSClient = Annotated[OpenSearch, Depends(_os_client)]
+ProfileBundle = Annotated[ActiveProfileBundle, Depends(get_active_profile_bundle)]
 
 
 @router.get(
@@ -56,7 +62,7 @@ All filters are optional and can be combined freely. Unknown fields are silently
     },
 )
 async def search_endpoint(
-    client: OSClient,
+    bundle: ProfileBundle,
     # ── Core ──────────────────────────────────────────────────────────────
     q: Annotated[
         str,
@@ -65,26 +71,26 @@ async def search_endpoint(
             max_length=500,
             description="Search query text",
             openapi_examples={
-                "procedure": {"summary": "Procedure name", "value": "rhinoplasty nose reshaping"},
+                "keyword": {"summary": "Keyword query", "value": "example product name"},
                 "descriptive": {
                     "summary": "Descriptive query",
-                    "value": "anti aging face treatment",
-                },
-                "doctor": {"summary": "Doctor search", "value": "plastic surgeon Los Angeles"},
-                "review": {
-                    "summary": "Review sentiment",
-                    "value": "worth it no scars great results",
+                    "value": "lightweight portable device under 500",
                 },
             },
         ),
     ],
     mode: Annotated[
-        str,
+        SearchMode,
         Query(description="Search algorithm: bm25 | semantic | hybrid | rrf"),
-    ] = "hybrid",
+    ] = SearchMode.HYBRID,
     index: Annotated[
         str,
-        Query(description="Collection: all | procedures | doctors | reviews"),
+        Query(
+            description=(
+                "Logical index key from the active connection profile: typically `all` for "
+                "combined search, or a specific named index."
+            ),
+        ),
     ] = "all",
     size: Annotated[int, Query(ge=1, le=50, description="Results to return (1–50)")] = 10,
     # ── Hybrid tuning ─────────────────────────────────────────────────────
@@ -109,45 +115,41 @@ async def search_endpoint(
         Query(description="Include per-document score breakdown in response"),
     ] = False,
     # ── Filters ───────────────────────────────────────────────────────────
-    min_rating: Annotated[
-        float | None,
+    # ── Generic key-value filters ──────────────────────────────────────────
+    filter_term: Annotated[
+        list[str] | None,
         Query(
-            ge=0.0,
-            le=5.0,
-            description="Minimum average_rating (procedures/doctors) or rating (reviews)",
+            description=(
+                "Exact term filter — repeat for multiple values. "
+                "Format: `field:value`. "
+                "Booleans auto-detected: `in_stock:true`, `verified:false`. "
+                "Example: `filter_term=category:Electronics&filter_term=in_stock:true`"
+            ),
+            openapi_examples={
+                "string_field": {"summary": "String term", "value": "category:Electronics"},
+                "boolean_field": {"summary": "Boolean term", "value": "in_stock:true"},
+            },
         ),
     ] = None,
-    max_cost_usd: Annotated[
-        int | None,
-        Query(ge=0, description="Maximum average_cost_usd (procedures only)"),
+    filter_gte: Annotated[
+        list[str] | None,
+        Query(
+            description=(
+                "Numeric lower bound (≥) — repeat for multiple fields. "
+                "Format: `field:number`. "
+                "Example: `filter_gte=rating:4.0&filter_gte=price:100`"
+            ),
+        ),
     ] = None,
-    category: Annotated[
-        str | None,
-        Query(description="Exact procedure category (e.g. Facial, Body, Skin)"),
-    ] = None,
-    body_area: Annotated[
-        str | None,
-        Query(description="Exact body area (e.g. Nose, Face, Abdomen)"),
-    ] = None,
-    is_surgical: Annotated[
-        bool | None,
-        Query(description="Filter by surgical flag (procedures only)"),
-    ] = None,
-    specialty: Annotated[
-        str | None,
-        Query(description="Doctor specialty (e.g. 'Plastic Surgeon')"),
-    ] = None,
-    min_experience: Annotated[
-        int | None,
-        Query(ge=0, description="Minimum years of doctor experience"),
-    ] = None,
-    worth_it: Annotated[
-        str | None,
-        Query(description="Review verdict: Excellent | Good | Not Worth It"),
-    ] = None,
-    verified: Annotated[
-        bool | None,
-        Query(description="Filter reviews by verified status"),
+    filter_lte: Annotated[
+        list[str] | None,
+        Query(
+            description=(
+                "Numeric upper bound (≤) — repeat for multiple fields. "
+                "Format: `field:number`. "
+                "Example: `filter_lte=price:500`"
+            ),
+        ),
     ] = None,
 ) -> SearchResponse:
     params = SearchParams(
@@ -159,17 +161,27 @@ async def search_endpoint(
         knn_weight=knn_weight,
         num_candidates=num_candidates,
         explain=explain,
-        min_rating=min_rating,
-        max_cost_usd=max_cost_usd,
-        category=category,
-        body_area=body_area,
-        is_surgical=is_surgical,
-        specialty=specialty,
-        min_experience=min_experience,
-        worth_it=worth_it,
-        verified=verified,
+        filter_term=list(filter_term or []),
+        filter_gte=list(filter_gte or []),
+        filter_lte=list(filter_lte or []),
     )
-    result = await search(client, params)
+    index_alias = bundle.to_alias_map()
+    bm25_fields_by_key = bundle.to_bm25_fields_map()
+    try:
+        result = await search(
+            bundle.opensearch_client,
+            params,
+            index_alias,
+            bm25_fields_by_key,
+            bundle.embed,
+        )
+    except InvalidInputError:
+        raise
+    except TransportError as err:
+        raise ServiceUnavailableError(
+            code=SEARCH_UNAVAILABLE,
+            detail="Search service temporarily unavailable",
+        ) from err
     return SearchResponse(**result)
 
 
@@ -198,7 +210,7 @@ Python-side score breakdown instead.
     },
 )
 async def explain_endpoint(
-    client: OSClient,
+    bundle: ProfileBundle,
     index_key: str,
     doc_id: str,
     q: Annotated[
@@ -207,11 +219,26 @@ async def explain_endpoint(
     ],
 ) -> ExplainResponse:
     try:
-        raw = await explain_document_async(client, index_key, doc_id, q)
-    except NotFoundError as exc:
-        raise HTTPException(
-            status_code=404, detail=f"Document '{doc_id}' not found in index '{index_key}'"
+        index_alias = bundle.to_alias_map()
+        bm25_fields_by_key = bundle.to_bm25_fields_map()
+        raw = await explain_document_async(
+            bundle.opensearch_client,
+            index_key,
+            doc_id,
+            q,
+            index_alias,
+            bm25_fields_by_key,
+        )
+    except OpenSearchNotFoundError as exc:
+        raise DocumentNotFoundAppError(
+            code=DOCUMENT_NOT_FOUND,
+            detail=f"Document '{doc_id}' not found in index '{index_key}'",
         ) from exc
+    except TransportError as err:
+        raise ServiceUnavailableError(
+            code=SEARCH_UNAVAILABLE,
+            detail="Search service temporarily unavailable",
+        ) from err
     return ExplainResponse(
         doc_id=raw["_id"],
         index=raw["_index"],

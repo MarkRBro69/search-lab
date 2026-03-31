@@ -58,9 +58,9 @@ def index_name(domain: str) -> str:
     return f"{APP_ENV}_{domain}_v1"
 
 
-PROCEDURES_INDEX = index_name("procedures")
-DOCTORS_INDEX = index_name("doctors")
-REVIEWS_INDEX = index_name("reviews")
+INDEX_A = index_name("index_a")
+INDEX_B = index_name("index_b")
+INDEX_C = index_name("index_c")
 
 # ---------------------------------------------------------------------------
 # Domain data
@@ -613,9 +613,9 @@ def main() -> None:
 
     # Create indices
     print("\nSetting up indices...")
-    create_index(client, PROCEDURES_INDEX, PROCEDURES_MAPPING, args.clear)
-    create_index(client, DOCTORS_INDEX, DOCTORS_MAPPING, args.clear)
-    create_index(client, REVIEWS_INDEX, REVIEWS_MAPPING, args.clear)
+    create_index(client, INDEX_A, PROCEDURES_MAPPING, args.clear)
+    create_index(client, INDEX_B, DOCTORS_MAPPING, args.clear)
+    create_index(client, INDEX_C, REVIEWS_MAPPING, args.clear)
 
     # Generate and index procedures
     procedures: list[dict] = []
@@ -626,12 +626,10 @@ def main() -> None:
         if model:
             print("  Generating embeddings for procedures...")
             attach_embeddings(model, procedures, procedure_text)
-        ok, err = bulk_index(client, PROCEDURES_INDEX, procedures)
+        ok, err = bulk_index(client, INDEX_A, procedures)
         print(f"  Indexed: {ok} | Errors: {err}")
     else:
-        resp = client.search(
-            index=PROCEDURES_INDEX, body={"query": {"match_all": {}}, "size": 1000}
-        )
+        resp = client.search(index=INDEX_A, body={"query": {"match_all": {}}, "size": 1000})
         procedures = [hit["_source"] for hit in resp["hits"]["hits"]]
         print(f"\nUsing {len(procedures)} existing procedures for reviews")
 
@@ -643,10 +641,10 @@ def main() -> None:
         if model:
             print("  Generating embeddings for doctors...")
             attach_embeddings(model, doctors, doctor_text)
-        ok, err = bulk_index(client, DOCTORS_INDEX, doctors)
+        ok, err = bulk_index(client, INDEX_B, doctors)
         print(f"  Indexed: {ok} | Errors: {err}")
     else:
-        resp = client.search(index=DOCTORS_INDEX, body={"query": {"match_all": {}}, "size": 1000})
+        resp = client.search(index=INDEX_B, body={"query": {"match_all": {}}, "size": 1000})
         doctors = [hit["_source"] for hit in resp["hits"]["hits"]]
         print(f"\nUsing {len(doctors)} existing doctors for reviews")
 
@@ -657,7 +655,7 @@ def main() -> None:
         if model:
             print("  Generating embeddings for reviews...")
             attach_embeddings(model, reviews, review_text)
-        ok, err = bulk_index(client, REVIEWS_INDEX, reviews)
+        ok, err = bulk_index(client, INDEX_C, reviews)
         print(f"  Indexed: {ok} | Errors: {err}")
     elif args.reviews > 0:
         print("\nSkipping reviews — no procedures or doctors available")
@@ -665,7 +663,7 @@ def main() -> None:
     # Summary
     client.indices.refresh(index=f"{APP_ENV}_*_v1")
     print("\n--- Summary ---")
-    for idx in [PROCEDURES_INDEX, DOCTORS_INDEX, REVIEWS_INDEX]:
+    for idx in [INDEX_A, INDEX_B, INDEX_C]:
         if client.indices.exists(index=idx):
             count = client.count(index=idx)["count"]
             print(f"  {idx}: {count:,} documents")

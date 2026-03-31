@@ -20,7 +20,12 @@ def get_db() -> AsyncIOMotorDatabase:  # type: ignore[type-arg]
     global _client
     if _client is None:
         _client = AsyncIOMotorClient(MONGODB_URL)
-        logger.info("mongodb_client_created", url=MONGODB_URL, db=MONGODB_DB)
+        log = logger.bind(
+            module="shared.mongodb",
+            operation="get_db",
+            request_id="-",
+        )
+        log.info("mongodb_client_created", url=MONGODB_URL, db=MONGODB_DB)
     return _client[MONGODB_DB]
 
 
@@ -30,4 +35,9 @@ async def close_client() -> None:
     if _client is not None:
         _client.close()
         _client = None
-        logger.info("mongodb_client_closed")
+        log = logger.bind(
+            module="shared.mongodb",
+            operation="close_client",
+            request_id="-",
+        )
+        log.info("mongodb_client_closed")

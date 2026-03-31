@@ -25,8 +25,8 @@ from __future__ import annotations
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Path
-from opensearchpy import OpenSearch
+from fastapi import APIRouter, Depends, Path
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel, Field
 
 from src.modules.experiments.application import experiments_service
@@ -36,8 +36,15 @@ from src.modules.experiments.domain.models import (
     BenchmarkRun,
     QueryTemplate,
 )
+from src.modules.profiles.api import ActiveProfileBundle, get_active_profile_bundle
+from src.shared.exceptions import (
+    ALGORITHM_NOT_FOUND,
+    RUN_NOT_FOUND,
+    TEMPLATE_NOT_FOUND,
+    NotFoundError,
+)
 from src.shared.infrastructure.mongodb import get_db
-from src.shared.infrastructure.opensearch import get_client
+from src.shared.search_mode import SearchMode
 
 logger = structlog.get_logger()
 
@@ -49,16 +56,12 @@ router = APIRouter(prefix="/experiments", tags=["experiments"])
 # ---------------------------------------------------------------------------
 
 
-def _os_client() -> OpenSearch:
-    return get_client()
-
-
-def _db():  # type: ignore[return]
+def _db() -> AsyncIOMotorDatabase:
     return get_db()
 
 
-OSClient = Annotated[OpenSearch, Depends(_os_client)]
-MongoDb = Annotated[object, Depends(_db)]  # Motor DB — typed loosely for DI
+ProfileBundle = Annotated[ActiveProfileBundle, Depends(get_active_profile_bundle)]
+MongoDb = Annotated[AsyncIOMotorDatabase, Depends(_db)]
 
 
 # ---------------------------------------------------------------------------
@@ -69,11 +72,10 @@ MongoDb = Annotated[object, Depends(_db)]  # Motor DB — typed loosely for DI
 class AlgorithmCreate(BaseModel):
     name: str
     description: str = ""
-    mode: str = "hybrid"
+    mode: SearchMode = SearchMode.HYBRID
     bm25_weight: float = Field(default=0.3, ge=0.0, le=1.0)
     knn_weight: float = Field(default=0.7, ge=0.0, le=1.0)
     num_candidates: int = Field(default=50, ge=10, le=500)
-    index: str = "all"
     filters: AlgorithmFilters = Field(default_factory=AlgorithmFilters)
 
     model_config = {
@@ -99,7 +101,7 @@ class AlgorithmCreate(BaseModel):
                 {
                     "name": "BM25 surgical only",
                     "mode": "bm25",
-                    "index": "procedures",
+                    "index": "index_a",
                     "filters": {"is_surgical": True},
                 },
             ]
@@ -141,7 +143,15 @@ class BenchmarkRequest(BaseModel):
     name: str = Field(default="", description="Optional label for this run")
     algorithm_ids: list[str] = Field(..., description="IDs of Algorithm configs to evaluate")
     template_ids: list[str] = Field(..., description="IDs of QueryTemplates to evaluate against")
-    k: int = Field(default=10, ge=1, le=100, description="@K used for all metrics")
+    k: int = Field(
+        default=10,
+        ge=1,
+        le=200,
+        description="@K cutoff for metrics (NDCG@K, Precision@K, Recall@K)",
+    )
+    size: int = Field(
+        default=10, ge=1, le=200, description="Number of results to fetch per query (>= k)"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -151,6 +161,7 @@ class BenchmarkRequest(BaseModel):
                     "algorithm_ids": ["<algo-id-1>", "<algo-id-2>"],
                     "template_ids": ["<template-id-1>", "<template-id-2>"],
                     "k": 10,
+                    "size": 50,
                 }
             ]
         }
@@ -197,7 +208,7 @@ async def delete_algorithm(
 ) -> None:
     deleted = await experiments_service.delete_algorithm(db, algo_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Algorithm not found")
+        raise NotFoundError(code=ALGORITHM_NOT_FOUND, detail="Algorithm not found")
 
 
 # ---------------------------------------------------------------------------
@@ -241,11 +252,9 @@ async def update_template(
     body: TemplateUpdate,
     template_id: str = Path(description="Template ID"),
 ) -> QueryTemplate:
-    from src.modules.experiments.infrastructure.repository import get_template
-
-    existing = await get_template(db, template_id)
+    existing = await experiments_service.get_template(db, template_id)
     if existing is None:
-        raise HTTPException(status_code=404, detail="Template not found")
+        raise NotFoundError(code=TEMPLATE_NOT_FOUND, detail="Template not found")
 
     updated = existing.model_copy(
         update={k: v for k, v in body.model_dump().items() if v is not None}
@@ -264,7 +273,7 @@ async def delete_template(
 ) -> None:
     deleted = await experiments_service.delete_template(db, template_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Template not found")
+        raise NotFoundError(code=TEMPLATE_NOT_FOUND, detail="Template not found")
 
 
 # ---------------------------------------------------------------------------
@@ -291,20 +300,23 @@ The result is persisted in MongoDB and can be retrieved later.
 )
 async def run_benchmark(
     db: MongoDb,
-    client: OSClient,
+    bundle: ProfileBundle,
     body: BenchmarkRequest,
 ) -> BenchmarkRun:
-    try:
-        return await experiments_service.execute_benchmark(
-            db=db,
-            os_client=client,
-            algorithm_ids=body.algorithm_ids,
-            template_ids=body.template_ids,
-            k=body.k,
-            name=body.name,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    index_alias = bundle.to_alias_map()
+    bm25_fields_by_key = bundle.to_bm25_fields_map()
+    return await experiments_service.execute_benchmark(
+        db=db,
+        os_client=bundle.opensearch_client,
+        algorithm_ids=body.algorithm_ids,
+        template_ids=body.template_ids,
+        k=body.k,
+        size=max(body.size, body.k),
+        name=body.name,
+        index_alias=index_alias,
+        bm25_fields_by_key=bm25_fields_by_key,
+        embed=bundle.embed,
+    )
 
 
 @router.get(
@@ -329,7 +341,7 @@ async def get_run(
 ) -> BenchmarkRun:
     run = await experiments_service.get_run(db, run_id)
     if run is None:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise NotFoundError(code=RUN_NOT_FOUND, detail="Run not found")
     return run
 
 
@@ -344,4 +356,4 @@ async def delete_run(
 ) -> None:
     deleted = await experiments_service.delete_run(db, run_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Run not found")
+        raise NotFoundError(code=RUN_NOT_FOUND, detail="Run not found")

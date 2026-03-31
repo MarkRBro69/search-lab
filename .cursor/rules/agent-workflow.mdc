@@ -18,6 +18,7 @@ For file operations always prefer built-in tools over shell commands:
 | Find files by name/pattern | `Glob` | `Get-ChildItem`, `find` |
 | Read file contents | `Read` | `cat`, `Get-Content` |
 | Edit files | `StrReplace` / `Write` | `sed`, `echo >` |
+| Read terminal output | `Read` (terminals/*.txt) | `Shell cat`, `Get-Content` via Shell |
 
 Use `Shell` only for actual system commands: `git`, `uv`, `docker`, process management.
 
@@ -160,6 +161,15 @@ Each stage produces a structured document passed to the next.
 ## Affected files
 - `src/path/file.py` — {role, why affected}
 
+## Dependency Impact
+For each changed interface/schema/response, list all consumers that must be updated:
+| Changed component | Consumers | Update needed? |
+|---|---|---|
+| `src/.../api.py` function | `static/js/app.js` fetch call | Yes / No + reason |
+| Pydantic response schema | tests, UI field access | Yes / No + reason |
+| OpenSearch mapping | indexing_service, seed scripts | Yes / No + reason |
+| env var / config | Dockerfile, .env.example, docs | Yes / No + reason |
+
 ## External dependencies
 - {OpenSearch index / MongoDB collection / API}
 
@@ -190,6 +200,13 @@ def function_name(arg: Type) -> ReturnType: ...
 ## File plan
 - CREATE `src/...` — purpose
 - MODIFY `src/...` — what changes
+
+## Dependency coverage
+For each item in Context Doc Dependency Impact table — state what was done:
+| Consumer | Decision | File in plan? |
+|---|---|---|
+| `static/js/app.js` | updated fetch field access | Yes — line in file plan |
+| `tests/unit/...` | fixture unchanged, schema compatible | No — reason stated |
 
 ## Acceptance criteria
 - [ ] criterion
@@ -222,6 +239,8 @@ def function_name(arg: Type) -> ReturnType: ...
 - [ ] Follows .cursor/rules/
 - [ ] Matches spec (interfaces, files, acceptance criteria)
 - [ ] Lint passes
+- [ ] Dependency Impact items from Context Doc are addressed (each consumer updated or
+      explicitly skipped with reason — no silent omissions)
 
 ## Issues (if FAIL)
 {specific issue — rule file reference}
@@ -231,15 +250,23 @@ def function_name(arg: Type) -> ReturnType: ...
 
 ## Model Selection per Stage
 
-| Stage | Model | Reason |
+All subagents (Stages 1–4) inherit the model of the parent chat — **never pass `model:` parameter** when launching via `Task` tool. This ensures every stage runs on the same model as the main conversation.
+
+| Stage | Model | Note |
 |---|---|---|
-| Stage 1 — Context | `fast` | File scanning and structuring — no deep reasoning needed |
-| Stage 2 — Architect | default | Interface design requires careful analysis |
-| Stage 3 — Implementer | default | Code quality is critical |
-| Stage 4 — Reviewer | default | Thorough verification requires full capability |
+| Stage 1 — Context | inherited | Omit `model:` — inherits from parent |
+| Stage 2 — Architect | inherited | Omit `model:` — inherits from parent |
+| Stage 3 — Implementer | inherited | Omit `model:` — inherits from parent |
+| Stage 4 — Reviewer | inherited | Omit `model:` — inherits from parent |
 | Stage 5 — Knowledge Update | main chat | Already in orchestrator session |
 
-When launching via `Task` tool: pass `model: "fast"` for Stage 1, omit for others (inherits default).
+```python
+# ❌ NEVER — hardcodes a specific model for subagents
+Task(subagent_type="generalPurpose", model="fast", ...)
+
+# ✅ CORRECT — omit model so subagent inherits parent model
+Task(subagent_type="generalPurpose", ...)
+```
 
 ---
 
@@ -258,6 +285,23 @@ When launching via `Task` tool: pass `model: "fast"` for Stage 1, omit for other
 - Extract relevant constraints from project rules
 - If anything is ambiguous — list clarifying questions
 
+**Dependency tracing (mandatory):**
+After listing directly affected files, trace all dependents:
+1. **Backend → UI**: if a response schema or API endpoint changes, scan `static/js/app.js`
+   for all `fetch` calls and field accesses that consume that endpoint
+2. **Module interface → callers**: if `src/modules/*/api.py` changes, scan all importers
+   across `src/` and `tests/`
+3. **Schema/model → serializers + tests**: if a Pydantic model changes, find all usages in
+   presentation layer, test fixtures, and test assertions
+4. **OpenSearch mapping → indexing + seeds**: if index mapping changes, check
+   `indexing_service`, `seed.py`, and integration tests
+5. **Config / env var**: if a new setting is added, check `Dockerfile`, `.env.example`, docs
+6. **Backend ↔ Backend**: if a shared utility in `src/shared/` changes, find all module
+   consumers across `src/modules/`
+
+Document every finding in the **Dependency Impact** table — even if the answer is "no update
+needed", state the reason explicitly.
+
 ---
 
 ### Stage 2 — Architect
@@ -268,6 +312,9 @@ When launching via `Task` tool: pass `model: "fast"` for Stage 1, omit for other
 - Produce Spec Doc only — no implementation
 - Define interfaces BEFORE file plan
 - Acceptance criteria must be testable
+- For every row in Context Doc **Dependency Impact** table:
+  - If "update needed" → include the consumer file in the file plan with explicit change
+  - If "no update needed" → add an acceptance criterion that explicitly verifies this
 - End output with: `✋ Awaiting confirmation.`
 
 ---

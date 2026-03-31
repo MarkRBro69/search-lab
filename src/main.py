@@ -1,20 +1,31 @@
 from __future__ import annotations
 
+import os
 import uuid
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal
 
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from src.modules.experiments.api import experiments_router
+from src.modules.profiles.api import (
+    close_all_opensearch_clients,
+    ensure_default_profile_if_empty,
+    profiles_router,
+)
 from src.modules.search.api import document_router, eval_router, search_router
-from src.shared.infrastructure.embedding import get_model
+from src.shared.exceptions import AppError, ServiceUnavailableError
+from src.shared.infrastructure.embedding import init_local_embedding_model
+from src.shared.infrastructure.logging import configure_logging
 from src.shared.infrastructure.mongodb import close_client as close_mongo
 from src.shared.infrastructure.mongodb import get_db
-from src.shared.infrastructure.opensearch import close_client_sync, get_client
+
+configure_logging()
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -22,29 +33,40 @@ if TYPE_CHECKING:
 logger = structlog.get_logger()
 
 
+@dataclass(frozen=True)
+class Settings:
+    """Application settings loaded from the environment."""
+
+    LOCAL_MODEL_NAME: str
+
+
+settings = Settings(LOCAL_MODEL_NAME=os.getenv("LOCAL_MODEL_NAME", "all-MiniLM-L6-v2"))
+
+
+class HealthResponse(BaseModel):
+    status: Literal["ok"]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:
     """Initialize connections and warm up models on startup."""
-    logger.info("app_starting")
+    log = logger.bind(module="main", operation="lifespan", request_id="-")
+    log.info("app_starting")
 
-    get_client()
-    logger.info("opensearch_client_ready")
+    db = get_db()
+    log.info("mongodb_client_ready")
 
-    get_db()
-    logger.info("mongodb_client_ready")
+    await ensure_default_profile_if_empty(db)
 
-    # Warm up embedding model in background (CPU-bound, runs in thread on first search)
-    # Uncomment to pre-load at startup (slower boot, faster first request):
-    # await asyncio.to_thread(get_model)
-    get_model()
-    logger.info("embedding_model_ready")
+    init_local_embedding_model(settings.LOCAL_MODEL_NAME)
+    log.info("embedding_model_ready", model=settings.LOCAL_MODEL_NAME)
 
-    logger.info("app_started")
+    log.info("app_started")
     yield
 
-    close_client_sync()
+    close_all_opensearch_clients()
     await close_mongo()
-    logger.info("app_stopped")
+    log.info("app_stopped")
 
 
 app = FastAPI(
@@ -101,9 +123,37 @@ async def request_id_middleware(request: Request, call_next):
 # ---------------------------------------------------------------------------
 
 
+def _app_error_json_content(exc: AppError) -> dict[str, str]:
+    return {"detail": exc.detail, "code": exc.code}
+
+
+@app.exception_handler(ServiceUnavailableError)
+async def service_unavailable_handler(
+    request: Request, exc: ServiceUnavailableError
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=_app_error_json_content(exc),
+    )
+
+
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=_app_error_json_content(exc),
+    )
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    logger.error("unhandled_exception", exc_type=type(exc).__name__, detail=str(exc))
+    log = logger.bind(module="main", operation="unhandled_exception_handler")
+    log.error(
+        "unhandled_exception",
+        exc_type=type(exc).__name__,
+        exc_module=getattr(exc, "module", None) or "unknown",
+        exc_operation=getattr(exc, "operation", None) or "unknown",
+    )
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
@@ -115,11 +165,12 @@ app.include_router(search_router, prefix="/api/v1")
 app.include_router(document_router, prefix="/api/v1")
 app.include_router(eval_router, prefix="/api/v1")
 app.include_router(experiments_router, prefix="/api/v1")
+app.include_router(profiles_router, prefix="/api/v1")
 
 
-@app.get("/health", tags=["system"])
-async def health_check() -> dict:
-    return {"status": "ok"}
+@app.get("/health", response_model=HealthResponse, tags=["system"])
+async def health_check() -> HealthResponse:
+    return HealthResponse(status="ok")
 
 
 # ---------------------------------------------------------------------------

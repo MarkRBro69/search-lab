@@ -20,7 +20,7 @@ LLM-agent integration (query enrichment, reranking) is planned for a future iter
 - **ruff** — linter, formatter, import sorter (single tool, replaces black/flake8/isort)
 - **FastAPI** — async web framework
 - **OpenSearch 2.x** — search engine (BM25, KNN, RRF)
-- **sentence-transformers** — local embedding model `all-MiniLM-L6-v2` (384d)
+- **sentence-transformers** — local embedding model (name from `LOCAL_MODEL_NAME` env, default `all-MiniLM-L6-v2`); loaded once at startup via `init_local_embedding_model()`
 - **MongoDB + Motor** — async storage for benchmark results and experiment configs
 - **structlog** — structured logging (JSON in prod, readable in dev)
 - **pytest + pytest-asyncio** — testing (`asyncio_mode = "auto"`)
@@ -57,6 +57,15 @@ src/modules/
     application/            ← experiments_service (async N×M runner)
     infrastructure/         ← MongoDB repository (algorithms, templates, runs)
     presentation/           ← /experiments/algorithms, /templates, /benchmark routes
+  profiles/                 ← Connection Profiles: OpenSearch endpoint + model + configurable indices
+    api.py                  ← exports profiles_router, get_active_profile_bundle
+    domain/                 ← ConnectionProfile, OpenSearchConfig, EmbeddingConfig, ProfileIndices
+                                ProfileIndices.indices: dict[str,str]  (logical_key → physical_index)
+                                ProfileIndices.bm25_fields: dict[str,list[str]]  (logical_key → fields)
+                                Key "all" is reserved: auto-computed as comma-joined names if not set explicitly
+    application/            ← profiles_service, active_context (in-memory cache)
+    infrastructure/         ← MongoDB repository, opensearch_registry (client cache by profile_id)
+    presentation/           ← /profiles CRUD + /activate routes
   agents/                   ← (stub) LLM agents for future query enrichment
     api.py
 ```
@@ -109,8 +118,17 @@ The following personal skills are active for all projects and apply here:
 - **No `Any` types** — all type annotations must be explicit
 - **No magic strings** — use enums or constants
 - **No `pip install`** — always use `uv add`
+- **Error schema**: 4xx responses → `{"detail": str, "code": str}` via domain exceptions in `src/shared/exceptions.py`; 500 → `{"detail": "Internal server error"}` only; OpenSearch/MongoDB failures → 503 with sanitized fixed message
 - Secrets and PII must **never** appear in logs
+- Connection profile secrets (password, AWS keys) are **never** returned by API responses — UI must re-submit credentials on edit
+- `ProfileIndices` uses arbitrary `dict[str,str]` for index names — no hardcoded domain keys (`procedures`/`doctors`/`reviews`)
+- Document CRUD endpoints route by `index_key` (arbitrary profile key); write operations on the reserved `all` key are forbidden
 - Every endpoint must have a Pydantic request and response model
+- **UI is domain-agnostic** — `static/js/app.js` must not contain hardcoded field names
+  (beyond universal `name`/`title`), field-name patterns (`cost`, `rating`, `bio`, etc.),
+  or domain-specific formatting logic. The tool is a generic search evaluation playground
+  that must work equally well for medical procedures, e-commerce, legal documents, or any
+  other domain. Detect value characteristics by type/length at runtime, never by field name.
 
 ## Directory Layout
 
@@ -122,6 +140,7 @@ new_search/
 │   └── modules/
 │       ├── search/          # Search algorithms + eval metrics
 │       ├── experiments/     # Benchmark platform (core of this project)
+│       ├── profiles/        # Connection Profiles (OpenSearch + model + indices per profile)
 │       └── agents/          # (stub) LLM enrichment
 ├── scripts/
 │   ├── seed.py              # Populate OpenSearch with test documents

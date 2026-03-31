@@ -100,7 +100,57 @@ from opensearchpy.helpers import bulk
 success, errors = bulk(client, actions, chunk_size=500, raise_on_error=False)
 ```
 
+## Ephemeral (Non-Cached) Clients
+
+For one-shot operations (connection test, health check, migration scripts) — create a
+**separate client** that is **never written to the shared cache** and **always closed in
+`finally`**. This prevents stale or failed connections from poisoning the cache used by live
+request handlers.
+
+```python
+# ✅ CORRECT — ephemeral client for one-shot use
+async def ping_opensearch_ephemeral(config: OpenSearchConfig) -> PingResult:
+    client = build_ephemeral_opensearch_client(config)   # separate factory, no cache write
+    try:
+        ok = await asyncio.to_thread(client.ping)
+        return PingResult(ok=ok)
+    except Exception as exc:
+        return PingResult(ok=False, error=str(exc))
+    finally:
+        client.close()   # always close — even on error
+
+# ❌ WRONG — reusing the shared cached client for a test/health-check
+async def test_connection(profile_id: str) -> bool:
+    client = get_or_create_opensearch_client(profile_id, config)   # pollutes the cache
+    return client.ping()
+```
+
+The shared `get_or_create_opensearch_client` cache is only for production request traffic.
+
+## `_rank_eval` — Supported Metrics
+
+OpenSearch `_rank_eval` supports **only**: `dcg`, `precision`, `recall`, `mean_reciprocal_rank`.
+`ndcg` and `expected_reciprocal_rank` are **Elasticsearch-only** and cause a 400 `x_content_parse_exception`.
+For NDCG use the Python-computed `evaluate()` in `eval_service.py`.
+
 ## Error Handling
 
 Catch `opensearchpy.exceptions.NotFoundError` and `TransportError` at the repository level.
 Map them to domain exceptions before returning to the application layer.
+
+ALL OpenSearch calls (search, CRUD, explain) must catch `TransportError` and re-raise as
+`ServiceUnavailableError(code=SEARCH_UNAVAILABLE, detail="Search service temporarily unavailable") from err`.
+
+```python
+# ✅ Correct — applied to search_bm25, search_knn, search_bm25_wide, search_knn_wide
+try:
+    response = client.search(index=..., body=...)
+except TransportError as err:
+    raise ServiceUnavailableError(
+        code=SEARCH_UNAVAILABLE,
+        detail="Search service temporarily unavailable",
+    ) from err
+```
+
+**Anti-pattern**: wrapping CRUD but not search functions — leaves raw 500 tracebacks
+for the most common failure mode (search engine unreachable).

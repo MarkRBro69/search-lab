@@ -2,47 +2,47 @@
 
 from __future__ import annotations
 
-import os
-from typing import TYPE_CHECKING, Any
+import contextlib
+from typing import TYPE_CHECKING
 
 import structlog
+from opensearchpy.exceptions import NotFoundError, TransportError
+
+from src.shared.exceptions import SEARCH_UNAVAILABLE, ServiceUnavailableError
 
 if TYPE_CHECKING:
     from opensearchpy import OpenSearch
 
     from src.modules.search.application.search_params import SearchParams
 
-logger = structlog.get_logger()
+logger = structlog.get_logger(module="search")
 
-APP_ENV = os.getenv("APP_ENV", "development")
 
-INDEX_PROCEDURES = f"{APP_ENV}_procedures_v1"
-INDEX_DOCTORS = f"{APP_ENV}_doctors_v1"
-INDEX_REVIEWS = f"{APP_ENV}_reviews_v1"
-INDEX_ALL = f"{INDEX_PROCEDURES},{INDEX_DOCTORS},{INDEX_REVIEWS}"
+def _resolve_index(index_key: str, index_alias: dict[str, str], *, default_key: str = "all") -> str:
+    # Single known logical key → resolved physical name.
+    if index_key in index_alias:
+        return index_alias[index_key]
+    # Comma-joined logical keys (e.g. "doctors,procedures") → expand each to physical name.
+    parts = [p.strip() for p in index_key.split(",") if p.strip()]
+    if len(parts) > 1:
+        return ",".join(index_alias.get(p, p) for p in parts)
+    # Unknown single key (already a physical name) → pass through.
+    return index_key
 
-INDEX_ALIAS: dict[str, str] = {
-    "procedures": INDEX_PROCEDURES,
-    "doctors": INDEX_DOCTORS,
-    "reviews": INDEX_REVIEWS,
-    "all": INDEX_ALL,
-}
 
-_BM25_FIELDS: dict[str, list[str]] = {
-    "procedures": ["name^3", "description^2", "category", "body_area", "tags"],
-    "doctors": ["name^3", "specialty^2", "bio^2", "city", "certifications", "procedures_performed"],
-    "reviews": ["title^3", "content^2", "procedure_name", "doctor_name"],
-    "all": [
-        "name^3",
-        "title^3",
-        "description^2",
-        "content^2",
-        "specialty^2",
-        "bio^2",
-        "category",
-        "body_area",
-    ],
-}
+def _bm25_field_list(index_key: str, bm25_fields_by_key: dict[str, list[str]]) -> list[str]:
+    # For comma-joined keys, use the 'all' field list as the combined superset.
+    if "," in index_key:
+        return list(bm25_fields_by_key.get("all", []))
+    return list(bm25_fields_by_key.get(index_key, bm25_fields_by_key.get("all", [])))
+
+
+def _split_pair(s: str) -> tuple[str, str] | None:
+    """Split 'field:value' into (field, value). Returns None if the format is invalid."""
+    idx = s.find(":")
+    if idx <= 0:
+        return None
+    return s[:idx].strip(), s[idx + 1 :].strip()
 
 
 # ---------------------------------------------------------------------------
@@ -50,50 +50,44 @@ _BM25_FIELDS: dict[str, list[str]] = {
 # ---------------------------------------------------------------------------
 
 
-def build_filters(params: SearchParams) -> list[dict[str, Any]]:
-    """Build OpenSearch filter clauses from SearchParams."""
-    clauses: list[dict] = []
+def build_filters(params: SearchParams) -> list[dict[str, object]]:
+    """Build generic OpenSearch filter clauses from key-value filter params.
 
-    def range_(field: str, gte=None, lte=None) -> None:
-        r: dict = {}
-        if gte is not None:
-            r["gte"] = gte
-        if lte is not None:
-            r["lte"] = lte
-        clauses.append({"range": {field: r}})
+    Supports any document schema — field names are passed through as-is.
+    """
+    clauses: list[dict[str, object]] = []
 
-    def term(field: str, value) -> None:
-        clauses.append({"term": {field: value}})
+    for s in params.filter_term:
+        pair = _split_pair(s)
+        if not pair:
+            continue
+        f, v = pair
+        # Auto-cast "true"/"false" strings to booleans; pass everything else as string
+        if v.lower() == "true":
+            clauses.append({"term": {f: True}})
+        elif v.lower() == "false":
+            clauses.append({"term": {f: False}})
+        else:
+            clauses.append({"term": {f: v}})
 
-    if params.min_rating is not None:
-        # procedures/doctors use 'average_rating'; reviews use 'rating' — match either
-        clauses.append(
-            {
-                "bool": {
-                    "should": [
-                        {"range": {"average_rating": {"gte": params.min_rating}}},
-                        {"range": {"rating": {"gte": params.min_rating}}},
-                    ],
-                    "minimum_should_match": 1,
-                }
-            }
-        )
-    if params.max_cost_usd is not None:
-        range_("average_cost_usd", lte=params.max_cost_usd)
-    if params.category:
-        term("category", params.category)
-    if params.body_area:
-        term("body_area", params.body_area)
-    if params.is_surgical is not None:
-        term("is_surgical", params.is_surgical)
-    if params.specialty:
-        term("specialty", params.specialty)
-    if params.min_experience is not None:
-        range_("years_experience", gte=params.min_experience)
-    if params.worth_it:
-        term("worth_it", params.worth_it)
-    if params.verified is not None:
-        term("verified", params.verified)
+    # Merge gte/lte filters on the same field into a single range clause
+    ranges: dict[str, dict[str, float]] = {}
+    for s in params.filter_gte:
+        pair = _split_pair(s)
+        if not pair:
+            continue
+        f, v = pair
+        with contextlib.suppress(ValueError):
+            ranges.setdefault(f, {})["gte"] = float(v)
+    for s in params.filter_lte:
+        pair = _split_pair(s)
+        if not pair:
+            continue
+        f, v = pair
+        with contextlib.suppress(ValueError):
+            ranges.setdefault(f, {})["lte"] = float(v)
+    for f, bounds in ranges.items():
+        clauses.append({"range": {f: bounds}})
 
     return clauses
 
@@ -103,28 +97,40 @@ def build_filters(params: SearchParams) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def build_bm25_query(query: str, index_key: str) -> dict[str, dict]:
+def build_bm25_query(
+    query: str,
+    index_key: str,
+    bm25_fields_by_key: dict[str, list[str]],
+) -> dict[str, dict[str, object]]:
     """Return a bare multi_match query dict (for use in rank_eval requests)."""
+    fields = _bm25_field_list(index_key, bm25_fields_by_key)
     return {
         "multi_match": {
             "query": query,
-            "fields": _BM25_FIELDS.get(index_key, _BM25_FIELDS["all"]),
+            "fields": fields,
             "type": "best_fields",
             "fuzziness": "AUTO",
         }
     }
 
 
-def _bm25_body(params: SearchParams, size: int, include_explain: bool = False) -> dict:
+def _bm25_body(
+    params: SearchParams,
+    size: int,
+    bm25_fields_by_key: dict[str, list[str]],
+    include_explain: bool = False,
+) -> dict[str, object]:
     filters = build_filters(params)
-    multi_match: dict = {
+    fields = _bm25_field_list(params.index_key, bm25_fields_by_key)
+    multi_match: dict[str, object] = {
         "query": params.q,
-        "fields": _BM25_FIELDS.get(params.index_key, _BM25_FIELDS["all"]),
+        "fields": fields,
         "type": "best_fields",
         "fuzziness": "AUTO",
     }
+    body: dict[str, object]
     if filters:
-        body: dict = {
+        body = {
             "size": size,
             "query": {"bool": {"must": {"multi_match": multi_match}, "filter": filters}},
         }
@@ -135,9 +141,9 @@ def _bm25_body(params: SearchParams, size: int, include_explain: bool = False) -
     return body
 
 
-def _knn_body(vector: list[float], params: SearchParams, size: int) -> dict:
+def _knn_body(vector: list[float], params: SearchParams, size: int) -> dict[str, object]:
     filters = build_filters(params)
-    knn_clause: dict = {"vector": vector, "k": size}
+    knn_clause: dict[str, object] = {"vector": vector, "k": size}
     if filters:
         knn_clause["filter"] = {"bool": {"filter": filters}}
     return {"size": size, "query": {"knn": {"embedding": knn_clause}}}
@@ -148,25 +154,44 @@ def _knn_body(vector: list[float], params: SearchParams, size: int) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _extract_raw_hits(resp: dict) -> list[dict]:
-    hits = []
-    for h in resp["hits"]["hits"]:
-        src = h["_source"].copy()
+def _extract_raw_hits(resp: dict[str, object]) -> list[dict[str, object]]:
+    hits_obj = resp["hits"]
+    if not isinstance(hits_obj, dict):
+        return []
+    raw_hits = hits_obj.get("hits", [])
+    if not isinstance(raw_hits, list):
+        return []
+    hits: list[dict[str, object]] = []
+    for h in raw_hits:
+        if not isinstance(h, dict):
+            continue
+        src_raw = h.get("_source")
+        src: dict[str, object] = dict(src_raw) if isinstance(src_raw, dict) else {}
         src.pop("embedding", None)
+        score_raw = h.get("_score")
+        score = float(score_raw) if isinstance(score_raw, (int, float)) else 0.0
         hits.append(
             {
                 "id": h["_id"],
                 "index": h["_index"],
-                "score": h["_score"] or 0.0,
+                "score": score,
                 "source": src,
             }
         )
     return hits
 
 
-def _extract_total(resp: dict) -> int:
-    val = resp["hits"]["total"]
-    return val["value"] if isinstance(val, dict) else val
+def _extract_total(resp: dict[str, object]) -> int:
+    hits_obj = resp["hits"]
+    if not isinstance(hits_obj, dict):
+        return 0
+    val = hits_obj["total"]
+    if isinstance(val, dict):
+        v = val.get("value")
+        return int(v) if isinstance(v, int) else 0
+    if isinstance(val, int):
+        return val
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -174,31 +199,77 @@ def _extract_total(resp: dict) -> int:
 # ---------------------------------------------------------------------------
 
 
-def search_bm25(client: OpenSearch, params: SearchParams) -> dict:
-    index = INDEX_ALIAS.get(params.index_key, INDEX_ALL)
-    logger.debug("search_bm25", index=index, query=params.q)
-    return client.search(
-        index=index, body=_bm25_body(params, params.size, include_explain=params.explain)
-    )
+def search_bm25(
+    client: OpenSearch,
+    params: SearchParams,
+    index_alias: dict[str, str],
+    bm25_fields_by_key: dict[str, list[str]],
+) -> dict[str, object]:
+    try:
+        index = _resolve_index(params.index_key, index_alias)
+        log = logger.bind(operation="search_bm25")
+        log.debug("search_bm25", index=index, query=params.q)
+        body = _bm25_body(params, params.size, bm25_fields_by_key, include_explain=params.explain)
+        return client.search(index=index, body=body)
+    except TransportError as err:
+        raise ServiceUnavailableError(
+            code=SEARCH_UNAVAILABLE,
+            detail="Search service temporarily unavailable",
+        ) from err
 
 
-def search_knn(client: OpenSearch, vector: list[float], params: SearchParams) -> dict:
-    index = INDEX_ALIAS.get(params.index_key, INDEX_ALL)
-    logger.debug("search_knn", index=index)
-    return client.search(index=index, body=_knn_body(vector, params, params.size))
+def search_knn(
+    client: OpenSearch,
+    vector: list[float],
+    params: SearchParams,
+    index_alias: dict[str, str],
+) -> dict[str, object]:
+    try:
+        index = _resolve_index(params.index_key, index_alias)
+        log = logger.bind(operation="search_knn")
+        log.debug("search_knn", index=index)
+        return client.search(index=index, body=_knn_body(vector, params, params.size))
+    except TransportError as err:
+        raise ServiceUnavailableError(
+            code=SEARCH_UNAVAILABLE,
+            detail="Search service temporarily unavailable",
+        ) from err
 
 
-# Wider fetches for Python-side combination (hybrid / rrf)
-def search_bm25_wide(client: OpenSearch, params: SearchParams) -> list[dict]:
-    index = INDEX_ALIAS.get(params.index_key, INDEX_ALL)
-    resp = client.search(index=index, body=_bm25_body(params, params.candidate_size))
-    return _extract_raw_hits(resp)
+def search_bm25_wide(
+    client: OpenSearch,
+    params: SearchParams,
+    index_alias: dict[str, str],
+    bm25_fields_by_key: dict[str, list[str]],
+) -> list[dict[str, object]]:
+    try:
+        index = _resolve_index(params.index_key, index_alias)
+        resp = client.search(
+            index=index, body=_bm25_body(params, params.candidate_size, bm25_fields_by_key)
+        )
+        return _extract_raw_hits(resp)
+    except TransportError as err:
+        raise ServiceUnavailableError(
+            code=SEARCH_UNAVAILABLE,
+            detail="Search service temporarily unavailable",
+        ) from err
 
 
-def search_knn_wide(client: OpenSearch, vector: list[float], params: SearchParams) -> list[dict]:
-    index = INDEX_ALIAS.get(params.index_key, INDEX_ALL)
-    resp = client.search(index=index, body=_knn_body(vector, params, params.candidate_size))
-    return _extract_raw_hits(resp)
+def search_knn_wide(
+    client: OpenSearch,
+    vector: list[float],
+    params: SearchParams,
+    index_alias: dict[str, str],
+) -> list[dict[str, object]]:
+    try:
+        index = _resolve_index(params.index_key, index_alias)
+        resp = client.search(index=index, body=_knn_body(vector, params, params.candidate_size))
+        return _extract_raw_hits(resp)
+    except TransportError as err:
+        raise ServiceUnavailableError(
+            code=SEARCH_UNAVAILABLE,
+            detail="Search service temporarily unavailable",
+        ) from err
 
 
 # ---------------------------------------------------------------------------
@@ -206,49 +277,58 @@ def search_knn_wide(client: OpenSearch, vector: list[float], params: SearchParam
 # ---------------------------------------------------------------------------
 
 
-def get_document(client: OpenSearch, index_key: str, doc_id: str) -> dict | None:
-    index = INDEX_ALIAS.get(index_key)
+def get_document(
+    client: OpenSearch, index_key: str, doc_id: str, index_alias: dict[str, str]
+) -> dict[str, object] | None:
+    index = index_alias.get(index_key)
     if not index:
         return None
     try:
         return client.get(index=index, id=doc_id)
-    except Exception as exc:
-        logger.warning(
-            "opensearch_error",
-            operation="get_document",
-            index=index,
-            doc_id=doc_id,
-            exc_type=type(exc).__name__,
-            detail=str(exc),
-        )
+    except NotFoundError:
         return None
+    except TransportError as err:
+        raise ServiceUnavailableError(
+            code=SEARCH_UNAVAILABLE,
+            detail="Search service temporarily unavailable",
+        ) from err
 
 
-def index_document(client: OpenSearch, index_key: str, doc_id: str, body: dict) -> dict:
-    index = INDEX_ALIAS.get(index_key, INDEX_PROCEDURES)
+def index_document(
+    client: OpenSearch,
+    index_key: str,
+    doc_id: str,
+    body: dict[str, object],
+    index_alias: dict[str, str],
+) -> dict[str, object]:
+    index = index_alias.get(index_key)
+    if index is None:
+        msg = f"Unknown index key for index_document: {index_key!r}"
+        raise ValueError(msg)
     resp = client.index(index=index, id=doc_id, body=body, refresh="wait_for")
-    logger.info("document_indexed", index=index, doc_id=doc_id, result=resp.get("result"))
+    log = logger.bind(operation="index_document")
+    log.info("document_indexed", index=index, doc_id=doc_id, result=resp.get("result"))
     return resp
 
 
-def delete_document(client: OpenSearch, index_key: str, doc_id: str) -> bool:
-    index = INDEX_ALIAS.get(index_key)
+def delete_document(
+    client: OpenSearch, index_key: str, doc_id: str, index_alias: dict[str, str]
+) -> bool:
+    index = index_alias.get(index_key)
     if not index:
         return False
     try:
         resp = client.delete(index=index, id=doc_id, refresh="wait_for")
-        logger.info("document_deleted", index=index, doc_id=doc_id, result=resp.get("result"))
+        log = logger.bind(operation="delete_document")
+        log.info("document_deleted", index=index, doc_id=doc_id, result=resp.get("result"))
         return resp.get("result") == "deleted"
-    except Exception as exc:
-        logger.warning(
-            "opensearch_error",
-            operation="delete_document",
-            index=index,
-            doc_id=doc_id,
-            exc_type=type(exc).__name__,
-            detail=str(exc),
-        )
+    except NotFoundError:
         return False
+    except TransportError as err:
+        raise ServiceUnavailableError(
+            code=SEARCH_UNAVAILABLE,
+            detail="Search service temporarily unavailable",
+        ) from err
 
 
 # ---------------------------------------------------------------------------
@@ -261,11 +341,19 @@ def explain_document(
     index_key: str,
     doc_id: str,
     query: str,
-) -> dict:
+    index_alias: dict[str, str],
+    bm25_fields_by_key: dict[str, list[str]],
+) -> dict[str, object]:
     """Call OpenSearch _explain for a single document against a BM25 query."""
-    index = INDEX_ALIAS.get(index_key, INDEX_PROCEDURES)
-    body = {"query": build_bm25_query(query, index_key)}
-    logger.debug("explain_document", index=index, doc_id=doc_id)
+    index = index_alias.get(index_key)
+    if index is None:
+        msg = f"Unknown index key for explain: {index_key!r}"
+        raise ValueError(msg)
+    body: dict[str, object] = {
+        "query": build_bm25_query(query, index_key, bm25_fields_by_key),
+    }
+    log = logger.bind(operation="explain_document")
+    log.debug("explain_document", index=index, doc_id=doc_id)
     return client.explain(index=index, id=doc_id, body=body)
 
 
@@ -277,11 +365,13 @@ def explain_document(
 def rank_eval_native(
     client: OpenSearch,
     index_key: str,
-    requests: list[dict],
+    requests: list[dict[str, object]],
     metric: dict[str, dict[str, int]],
-) -> dict:
+    index_alias: dict[str, str],
+) -> dict[str, object]:
     """Call OpenSearch _rank_eval with pre-built request objects."""
-    index = INDEX_ALIAS.get(index_key, INDEX_ALL)
-    body: dict = {"requests": requests, "metric": metric}
-    logger.debug("rank_eval_native", index=index, num_requests=len(requests))
+    index = _resolve_index(index_key, index_alias)
+    body: dict[str, object] = {"requests": requests, "metric": metric}
+    log = logger.bind(operation="rank_eval_native")
+    log.debug("rank_eval_native", index=index, num_requests=len(requests))
     return client.rank_eval(body=body, index=index)

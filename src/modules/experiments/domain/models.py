@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from src.shared.search_mode import SearchMode
 
 # ---------------------------------------------------------------------------
 # Algorithm
@@ -20,35 +21,40 @@ from pydantic import BaseModel, Field
 
 
 class AlgorithmFilters(BaseModel):
-    """Optional filters applied during benchmark evaluation."""
+    """Optional filters applied during benchmark evaluation.
 
-    min_rating: float | None = None
-    max_cost_usd: int | None = None
-    category: str | None = None
-    body_area: str | None = None
-    is_surgical: bool | None = None
-    specialty: str | None = None
-    min_experience: int | None = None
-    worth_it: str | None = None
-    verified: bool | None = None
+    Uses the same domain-agnostic format as SearchParams:
+      filter_term  — exact term match: "field:value"
+      filter_gte   — numeric lower bound: "field:value"
+      filter_lte   — numeric upper bound: "field:value"
+    """
+
+    filter_term: list[str] = Field(default_factory=list)
+    filter_gte: list[str] = Field(default_factory=list)
+    filter_lte: list[str] = Field(default_factory=list)
 
 
 class Algorithm(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str = Field(..., description="Human-readable label, e.g. 'Hybrid 30/70 no-filter'")
     description: str = Field(default="", description="Optional notes about this configuration")
-    mode: Literal["bm25", "semantic", "hybrid", "rrf"] = Field(
-        default="hybrid",
+    mode: SearchMode = Field(
+        default=SearchMode.HYBRID,
         description="Search mode",
     )
     bm25_weight: float = Field(default=0.3, ge=0.0, le=1.0)
     knn_weight: float = Field(default=0.7, ge=0.0, le=1.0)
     num_candidates: int = Field(default=50, ge=10, le=500)
-    index: str = Field(
-        default="all", description="Target index: all | procedures | doctors | reviews"
-    )
     filters: AlgorithmFilters = Field(default_factory=AlgorithmFilters)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @model_validator(mode="after")
+    def bm25_knn_weights_sum_to_one(self) -> Algorithm:
+        total = self.bm25_weight + self.knn_weight
+        if abs(total - 1.0) > 1e-9:
+            msg = f"bm25_weight + knn_weight must equal 1.0 (got {total:.6f})"
+            raise ValueError(msg)
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +66,10 @@ class QueryTemplate(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str = Field(..., description="Short label for the template, e.g. 'rhinoplasty intent'")
     query: str = Field(..., description="The search query string")
-    index: str = Field(default="all", description="Default index for this template")
+    index: str = Field(
+        default="all",
+        description="Default logical index key for this template (from the active profile)",
+    )
     relevant_ids: list[str] = Field(
         default_factory=list,
         description="Ground-truth document IDs considered relevant for this query",
@@ -130,7 +139,8 @@ class BenchmarkRun(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str = Field(default="", description="Optional label for this run")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    k: int = Field(default=10, description="@K used for all metrics in this run")
+    k: int = Field(default=10, description="@K cutoff used for metrics (NDCG@K, Precision@K, etc.)")
+    size: int = Field(default=10, description="Number of results fetched per query (>= k)")
     algorithm_ids: list[str]
     template_ids: list[str]
     # results[algo_id][template_id] → TemplateResult

@@ -74,16 +74,106 @@ MongoDB example (`experiments` router): `get_db()` behind `_db()`, then `MongoDb
 ## Error Handling
 
 Use centralized exception handlers registered in `src/main.py`.
-Never raise `HTTPException` from application or domain layers — only from presentation.
+Never raise `HTTPException` directly for 4xx responses — always use domain exceptions
+from `src/shared/exceptions.py` (NotFoundError, InvalidInputError, etc.) which produce
+the required `{"detail", "code"}` contract via centralized handlers in main.py.
+HTTPException is only acceptable for edge cases not covered by domain exceptions (e.g. 401).
+(Previously: "only from presentation" — this was insufficient; bare HTTPException lacks `code`.)
+
+Domain exceptions live in `src/shared/exceptions.py`:
+```python
+class AppError(Exception):        # base
+    code: str; detail: str
+class ClientError(AppError): ...  # 4xx
+class NotFoundError(ClientError): ...          # 404
+class InvalidInputError(ClientError): ...      # 400
+class UnprocessableEntityError(ClientError): ... # 422
+class ServiceUnavailableError(AppError): ...   # 503
+```
+
+Error response schema for 4xx: `{"detail": str, "code": str}`.
+For 500: only `{"detail": "Internal server error"}` — no code, no raw upstream text.
+OpenSearch/MongoDB failures → `ServiceUnavailableError` with a fixed sanitized `detail`.
+
+Anti-patterns that produce bare 500 instead of domain errors:
+```python
+# ❌ ANTI-PATTERN — user-provided key on dict raises KeyError → unhandled 500
+resolved = index_alias[index_key]          # KeyError if key absent
+value = float(raw_metric)                  # TypeError/ValueError on bad input
+
+# ✅ CORRECT — validate before access, wrap type casts
+if index_key not in index_alias:
+    raise InvalidInputError(code=INVALID_INDEX_KEY, detail=f"Unknown index key: {index_key}")
+try:
+    value = float(raw_metric)
+except (TypeError, ValueError):
+    raise UnprocessableEntityError(code=EVAL_METRIC_INCOMPLETE, detail="metric_score is not numeric")
+```
 
 ```python
 # ✅ application layer raises domain exception
-raise SearchIndexNotFoundError(f"Index {index_name} does not exist")
+from src.shared.exceptions import InvalidInputError, SEARCH_INVALID_MODE
+raise InvalidInputError(code=SEARCH_INVALID_MODE, detail="Unknown mode: bm255")
 
-# ✅ presentation layer / exception handler maps it
-@app.exception_handler(SearchIndexNotFoundError)
-async def handle_index_not_found(request: Request, exc: SearchIndexNotFoundError):
-    return JSONResponse(status_code=404, content={"detail": str(exc)})
+# ✅ main.py registers centralized handler
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "code": exc.code},
+    )
+```
+
+## Pydantic v2 + TYPE_CHECKING anti-pattern
+
+With `from __future__ import annotations`, types imported only in `TYPE_CHECKING` blocks
+are NOT available at Pydantic v2 runtime → `PydanticUserError: not fully defined`.
+
+```python
+# ❌ ANTI-PATTERN — causes PydanticUserError at runtime
+if TYPE_CHECKING:
+    from datetime import datetime
+
+class MyModel(BaseModel):
+    created_at: datetime  # Pydantic cannot resolve this string annotation
+
+# ✅ CORRECT — import at runtime, suppress TC003
+from datetime import datetime  # noqa: TC003
+```
+
+## Pydantic v2 model_validator — mutation vs computation
+
+In `mode="after"` validators, **always return `self`**. Pydantic v2 ignores any other return
+value when constructing via `__init__` (emits `UserWarning` and silently drops the copy).
+
+To compute derived fields from other fields, use `mode="before"` where you return a modified
+`dict` — this is processed before field assignment and works correctly:
+
+```python
+# ❌ WRONG — model_copy() return value is silently dropped in mode="after"
+@model_validator(mode="after")
+def _compute(self) -> MyModel:
+    return self.model_copy(update={"derived": compute(self.field)})
+
+# ❌ WRONG — object.__setattr__ bypasses Pydantic entirely (internal hack)
+@model_validator(mode="after")
+def _compute(self) -> MyModel:
+    object.__setattr__(self, "derived", compute(self.field))
+    return self
+
+# ✅ CORRECT — compute in mode="before" (returns dict), validate in mode="after" (returns self)
+@model_validator(mode="before")
+@classmethod
+def _compute(cls, data: object) -> object:
+    if isinstance(data, dict) and "all" not in data.get("derived_field", {}):
+        data = {**data, "derived_field": compute(data)}
+    return data
+
+@model_validator(mode="after")
+def _validate(self) -> MyModel:
+    if not self.field:
+        raise ValueError("field required")
+    return self  # always return self, no mutations
 ```
 
 ## Lifespan

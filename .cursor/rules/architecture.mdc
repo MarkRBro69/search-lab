@@ -73,6 +73,37 @@ Skip `domain/` for simple CRUD or query-only modules.
 - Base entity / value object classes
 - Config loading (pydantic-settings)
 - Logging setup
-- Common exceptions
+- Common exceptions — `src/shared/exceptions.py`: domain exception hierarchy (`AppError`,
+  `ClientError`, `NotFoundError`, `InvalidInputError`, `UnprocessableEntityError`,
+  `ServiceUnavailableError`) with string code constants; mapped centrally in `main.py`;
+  application/domain layers import from here, never from `fastapi`
 
 Never put feature-specific code in `src/shared/`.
+
+## Test Coverage Non-Negotiable
+
+Every infrastructure repository module must have at least minimal unit tests covering:
+- `_to_mongo` / `_from_mongo` round-trip (for MongoDB repositories)
+- CRUD happy path with mocked client
+- Not-found path (returns `None`, not raises)
+
+Zero coverage on an infrastructure repo is a **critical gap** — metrics and data stored
+via that repo cannot be trusted without verified mapping logic.
+
+## Acceptance Criteria — Scope Rule
+
+When writing acceptance criteria for repository/infrastructure functions, **exclude parameters that are semantically inapplicable**:
+
+- KNN (vector) search functions do not need `bm25_fields_by_key` — omitting it is correct, not a gap.
+- Transport/native functions (e.g. `rank_eval_native`) that receive pre-built request bodies do not need BM25 config — they are not BM25 callers.
+
+```
+# ❌ BAD criterion — too broad
+- [ ] All search/explain/rank_eval repo functions accept bm25_fields_by_key
+
+# ✅ CORRECT — scoped to applicable functions
+- [ ] BM25-based search functions (search_bm25, search_bm25_wide, explain_document)
+      accept bm25_fields_by_key; KNN and rank_eval_native are exempt
+```
+
+Reviewers must not mark FAIL for missing parameters that are semantically irrelevant to the function's algorithm.

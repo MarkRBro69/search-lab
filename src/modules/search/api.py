@@ -12,8 +12,10 @@ from src.modules.search.application.search_service import search
 from src.modules.search.presentation.document_router import router as document_router
 from src.modules.search.presentation.eval_router import router as eval_router
 from src.modules.search.presentation.router import router as search_router
+from src.shared.search_mode import SearchMode
 
 __all__ = [
+    "SearchMode",
     "SearchParams",
     "document_router",
     "eval_router",

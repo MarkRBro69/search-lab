@@ -26,7 +26,8 @@ def get_client() -> OpenSearch:
             verify_certs=False,
             http_compress=True,
         )
-        logger.info("opensearch_client_ready")
+        log = logger.bind(module="shared.opensearch", operation="get_client")
+        log.info("opensearch_client_ready")
     return _client
 
 
@@ -35,4 +36,9 @@ def close_client_sync() -> None:
     if _client is not None:
         _client.close()
         _client = None
-        logger.info("opensearch_client_closed")
+        log = logger.bind(
+            module="shared.opensearch",
+            operation="close_client_sync",
+            request_id="-",
+        )
+        log.info("opensearch_client_closed")

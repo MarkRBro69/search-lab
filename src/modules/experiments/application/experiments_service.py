@@ -33,8 +33,17 @@ from src.modules.search.api import (
     recall_at_k,
     search,
 )
+from src.shared.exceptions import (
+    ALGORITHM_NOT_FOUND,
+    BENCHMARK_SIZE_LT_K,
+    TEMPLATE_NOT_FOUND,
+    InvalidInputError,
+    NotFoundError,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from motor.motor_asyncio import AsyncIOMotorDatabase
     from opensearchpy import OpenSearch
 
@@ -46,27 +55,21 @@ logger = structlog.get_logger()
 # ---------------------------------------------------------------------------
 
 
-def _algo_to_params(algo: Algorithm, template: QueryTemplate, k: int) -> SearchParams:
+def _algo_to_params(algo: Algorithm, template: QueryTemplate, size: int) -> SearchParams:
     """Translate an Algorithm + QueryTemplate pair into a SearchParams dataclass."""
     f = algo.filters
     return SearchParams(
         q=template.query,
         mode=algo.mode,
-        index_key=algo.index or template.index,
-        size=k,
+        index_key=template.index,
+        size=size,
         bm25_weight=algo.bm25_weight,
         knn_weight=algo.knn_weight,
         num_candidates=algo.num_candidates,
         explain=False,
-        min_rating=f.min_rating,
-        max_cost_usd=f.max_cost_usd,
-        category=f.category,
-        body_area=f.body_area,
-        is_surgical=f.is_surgical,
-        specialty=f.specialty,
-        min_experience=f.min_experience,
-        worth_it=f.worth_it,
-        verified=f.verified,
+        filter_term=f.filter_term,
+        filter_gte=f.filter_gte,
+        filter_lte=f.filter_lte,
     )
 
 
@@ -76,7 +79,7 @@ def _algo_to_params(algo: Algorithm, template: QueryTemplate, k: int) -> SearchP
 
 
 def _compute_result(
-    hits: list[dict],
+    hits: list[dict[str, object]],
     relevant_ids: list[str],
     latency_ms: int,
     k: int,
@@ -157,20 +160,39 @@ async def run_benchmark(
     os_client: OpenSearch,
     algorithms: list[Algorithm],
     templates: list[QueryTemplate],
+    *,
     k: int = 10,
+    size: int = 10,
     name: str = "",
+    index_alias: dict[str, str],
+    bm25_fields_by_key: dict[str, list[str]],
+    embed: Callable[[str], Awaitable[list[float]]],
 ) -> BenchmarkRun:
-    """Execute all (algo × template) pairs concurrently, return a BenchmarkRun."""
+    """Execute all (algo × template) pairs concurrently, return a BenchmarkRun.
+
+    size — how many results to fetch from OpenSearch per query (>= k).
+    k    — metrics cutoff: NDCG@K, Precision@K, Recall@K are computed over top-k only.
+    """
+    if size < k:
+        raise InvalidInputError(
+            code=BENCHMARK_SIZE_LT_K,
+            detail=f"size must be >= k (got size={size}, k={k})",
+        )
+    _os = os_client
+    _idx = index_alias
+    _bm25 = bm25_fields_by_key
+    _embed = embed
+    pair_log = logger.bind(module="experiments", operation="run_benchmark")
 
     async def _eval_pair(
         algo: Algorithm, template: QueryTemplate
     ) -> tuple[str, str, TemplateResult]:
-        params = _algo_to_params(algo, template, k)
+        params = _algo_to_params(algo, template, size)
         t0 = time.monotonic()
-        result = await search(os_client, params)
+        result = await search(_os, params, _idx, _bm25, _embed)
         latency_ms = int((time.monotonic() - t0) * 1000)
         tr = _compute_result(result["hits"], template.relevant_ids, latency_ms, k)
-        logger.info(
+        pair_log.info(
             "benchmark_pair_done",
             algo=algo.name,
             template=template.name,
@@ -192,6 +214,7 @@ async def run_benchmark(
     return BenchmarkRun(
         name=name,
         k=k,
+        size=size,
         algorithm_ids=[a.id for a in algorithms],
         template_ids=[t.id for t in templates],
         results=results,
@@ -224,6 +247,10 @@ async def list_templates(db: AsyncIOMotorDatabase) -> list[QueryTemplate]:  # ty
     return await repository.list_templates(db)
 
 
+async def get_template(db: AsyncIOMotorDatabase, template_id: str) -> QueryTemplate | None:  # type: ignore[type-arg]
+    return await repository.get_template(db, template_id)
+
+
 async def update_template(db: AsyncIOMotorDatabase, template: QueryTemplate) -> QueryTemplate:  # type: ignore[type-arg]
     return await repository.update_template(db, template)
 
@@ -238,9 +265,34 @@ async def execute_benchmark(
     algorithm_ids: list[str],
     template_ids: list[str],
     k: int,
+    size: int,
     name: str,
+    index_alias: dict[str, str],
+    bm25_fields_by_key: dict[str, list[str]],
+    embed: Callable[[str], Awaitable[list[float]]],
 ) -> BenchmarkRun:
-    """Resolve IDs → objects, run benchmark, persist and return the run."""
+    """Resolve IDs → objects, run benchmark, persist and return the run.
+
+    size — results fetched per query from OpenSearch (>= k).
+    k    — metrics cutoff: NDCG@K, Precision@K, Recall@K are computed over top-k only.
+    """
+    log = logger.bind(module="experiments", operation="execute_benchmark")
+    log.info(
+        "benchmark_started",
+        num_algorithms=len(algorithm_ids),
+        num_templates=len(template_ids),
+        k=k,
+        size=size,
+    )
+    if size < k:
+        raise InvalidInputError(
+            code=BENCHMARK_SIZE_LT_K,
+            detail=f"size must be >= k (got size={size}, k={k})",
+        )
+    _os = os_client
+    _idx = index_alias
+    _bm25 = bm25_fields_by_key
+    _embed = embed
     algo_tasks = [repository.get_algorithm(db, aid) for aid in algorithm_ids]
     tmpl_tasks = [repository.get_template(db, tid) for tid in template_ids]
     algos_raw, tmpls_raw = await asyncio.gather(
@@ -250,14 +302,34 @@ async def execute_benchmark(
 
     missing_algos = [aid for aid, a in zip(algorithm_ids, algos_raw, strict=True) if a is None]
     missing_tmpls = [tid for tid, t in zip(template_ids, tmpls_raw, strict=True) if t is None]
-    if missing_algos or missing_tmpls:
-        raise ValueError(f"Not found — algorithms: {missing_algos}, templates: {missing_tmpls}")
+    if missing_algos:
+        raise NotFoundError(
+            code=ALGORITHM_NOT_FOUND,
+            detail=f"Algorithms not found: {missing_algos}",
+        )
+    if missing_tmpls:
+        raise NotFoundError(
+            code=TEMPLATE_NOT_FOUND,
+            detail=f"Templates not found: {missing_tmpls}",
+        )
 
     algos: list[Algorithm] = list(algos_raw)  # type: ignore[arg-type]
     tmpls: list[QueryTemplate] = list(tmpls_raw)  # type: ignore[arg-type]
 
-    run = await run_benchmark(os_client, algos, tmpls, k=k, name=name)
-    return await repository.save_run(db, run)
+    run = await run_benchmark(
+        _os,
+        algos,
+        tmpls,
+        k=k,
+        size=size,
+        name=name,
+        index_alias=_idx,
+        bm25_fields_by_key=_bm25,
+        embed=_embed,
+    )
+    saved = await repository.save_run(db, run)
+    log.info("benchmark_completed", run_id=saved.id, name=saved.name)
+    return saved
 
 
 async def list_runs(db: AsyncIOMotorDatabase) -> list[BenchmarkRun]:  # type: ignore[type-arg]

@@ -165,7 +165,7 @@ class RankEvalRequest(BaseModel):
                     ],
                     "index": "my-index",
                     "k": 10,
-                    "metric": "ndcg",
+                    "metric": "dcg",
                 }
             ]
         }

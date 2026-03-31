@@ -40,6 +40,24 @@ async def search_endpoint(client: OSClient, ...) -> SearchResponse:
 
 All request and response bodies must be Pydantic v2 models. No raw dicts in endpoints.
 
+### OpenAPI examples must be valid
+
+Values in `model_config["json_schema_extra"]["examples"]` must pass the model's own
+validation — including enum fields. Invalid examples break Swagger UI and mislead users.
+
+```python
+# ❌ WRONG — "ndcg" is not in RankEvalMetric enum; Swagger shows an example that fails
+class RankEvalRequest(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"examples": [{"metric": "ndcg", ...}]})
+
+# ✅ CORRECT — use an actual valid enum value
+class RankEvalRequest(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"examples": [{"metric": "dcg", ...}]})
+```
+
+When adding a new enum or changing allowed values, update all `json_schema_extra` examples
+in the same commit.
+
 ```python
 # ✅ CORRECT
 class SearchRequest(BaseModel):

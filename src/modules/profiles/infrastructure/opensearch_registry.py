@@ -90,11 +90,11 @@ async def ping_opensearch_ephemeral(config: OpenSearchConfig) -> EphemeralPingOu
                     ok=False, latency_ms=latency_ms, error="OpenSearch ping failed"
                 )
             return EphemeralPingOutcome(ok=True, latency_ms=latency_ms, error=None)
-        except Exception:
+        except Exception as exc:
             latency_ms = (time.perf_counter() - t0) * 1000.0
-            log.warning("opensearch_ping_failed")
+            log.warning("opensearch_ping_failed", error=str(exc), exc_info=True)
             return EphemeralPingOutcome(
-                ok=False, latency_ms=latency_ms, error="OpenSearch ping failed"
+                ok=False, latency_ms=latency_ms, error=f"OpenSearch ping failed: {exc}"
             )
     finally:
         client.close()

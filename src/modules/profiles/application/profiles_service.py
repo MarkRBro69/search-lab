@@ -181,13 +181,13 @@ async def test_profile_connections(
                 latency_ms=latency_ms,
                 error=None,
             )
-        except Exception:
+        except Exception as exc:
             latency_ms = (time.perf_counter() - t_embed) * 1000.0
-            log.warning("embedding_call_failed")
+            log.warning("embedding_call_failed", error=str(exc), exc_info=True)
             embedding_row = ProfileSubsystemCheckData(
                 ok=False,
                 latency_ms=latency_ms,
-                error="Embedding call failed",
+                error=f"Embedding call failed: {exc}",
             )
 
     log.info(

@@ -26,7 +26,7 @@ from src.shared.infrastructure.logging import configure_logging
 from src.shared.infrastructure.mongodb import close_client as close_mongo
 from src.shared.infrastructure.mongodb import get_db
 
-load_dotenv()
+load_dotenv(override=True)
 configure_logging()
 
 if TYPE_CHECKING:

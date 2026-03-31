@@ -194,7 +194,8 @@ async def test_test_profile_connections_embed_call_fails(mock_db: AsyncIOMotorDa
         out = await profiles_service.test_profile_connections(mock_db, profile.id)
         assert out.opensearch.ok is True
         assert out.embedding.ok is False
-        assert out.embedding.error == "Embedding call failed"
+        assert out.embedding.error is not None
+        assert out.embedding.error.startswith("Embedding call failed")
 
 
 async def test_test_profile_connections_build_backend_invalid(

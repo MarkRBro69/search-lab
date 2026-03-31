@@ -48,6 +48,7 @@ class OpenSearchConfigPublic(BaseModel):
     auth_type: OpenSearchAuthType
     username: str | None = None
     aws_region: str | None = None
+    timeout_s: int = 60
 
 
 class EmbeddingConfigPublic(BaseModel):
@@ -87,6 +88,7 @@ def _to_public(profile: ConnectionProfile) -> ConnectionProfilePublic:
             auth_type=o.auth_type,
             username=o.username,
             aws_region=o.aws_region,
+            timeout_s=o.timeout_s,
         ),
         embedding=EmbeddingConfigPublic(
             provider=e.provider,

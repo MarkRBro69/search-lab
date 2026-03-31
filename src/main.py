@@ -133,6 +133,14 @@ def _app_error_json_content(exc: AppError) -> dict[str, str]:
 async def service_unavailable_handler(
     request: Request, exc: ServiceUnavailableError
 ) -> JSONResponse:
+    log = logger.bind(module="main", operation="service_unavailable_handler")
+    cause = exc.__cause__
+    log.warning(
+        "service_unavailable",
+        code=exc.code,
+        cause_type=type(cause).__name__ if cause else None,
+        cause=str(cause)[:500] if cause else None,
+    )
     return JSONResponse(
         status_code=exc.status_code,
         content=_app_error_json_content(exc),

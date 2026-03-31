@@ -199,6 +199,26 @@ def _extract_total(resp: dict[str, object]) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _transport_error_info_snippet(err: TransportError) -> str:
+    """Safe `err.info` — the property can raise if the exception tuple is incomplete."""
+    try:
+        return str(err.info)[:500]
+    except IndexError, TypeError, AttributeError:
+        return ""
+
+
+def _log_transport_error(operation: str, err: TransportError, **ctx: object) -> None:
+    """Log TransportError details before converting to ServiceUnavailableError."""
+    log = logger.bind(operation=operation)
+    log.error(
+        "opensearch_transport_error",
+        status_code=getattr(err, "status_code", None),
+        error=str(getattr(err, "error", err))[:500],
+        info=_transport_error_info_snippet(err),
+        **ctx,
+    )
+
+
 def search_bm25(
     client: OpenSearch,
     params: SearchParams,
@@ -212,6 +232,7 @@ def search_bm25(
         body = _bm25_body(params, params.size, bm25_fields_by_key, include_explain=params.explain)
         return client.search(index=index, body=body)
     except TransportError as err:
+        _log_transport_error("search_bm25", err, index=params.index_key, query=params.q)
         raise ServiceUnavailableError(
             code=SEARCH_UNAVAILABLE,
             detail="Search service temporarily unavailable",
@@ -230,6 +251,7 @@ def search_knn(
         log.debug("search_knn", index=index)
         return client.search(index=index, body=_knn_body(vector, params, params.size))
     except TransportError as err:
+        _log_transport_error("search_knn", err, index=params.index_key)
         raise ServiceUnavailableError(
             code=SEARCH_UNAVAILABLE,
             detail="Search service temporarily unavailable",
@@ -249,6 +271,7 @@ def search_bm25_wide(
         )
         return _extract_raw_hits(resp)
     except TransportError as err:
+        _log_transport_error("search_bm25_wide", err, index=params.index_key, query=params.q)
         raise ServiceUnavailableError(
             code=SEARCH_UNAVAILABLE,
             detail="Search service temporarily unavailable",
@@ -266,6 +289,7 @@ def search_knn_wide(
         resp = client.search(index=index, body=_knn_body(vector, params, params.candidate_size))
         return _extract_raw_hits(resp)
     except TransportError as err:
+        _log_transport_error("search_knn_wide", err, index=params.index_key)
         raise ServiceUnavailableError(
             code=SEARCH_UNAVAILABLE,
             detail="Search service temporarily unavailable",

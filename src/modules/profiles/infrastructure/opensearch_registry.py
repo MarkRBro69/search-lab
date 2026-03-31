@@ -43,6 +43,7 @@ def _build_opensearch_client(config: OpenSearchConfig) -> OpenSearch:
         "use_ssl": config.use_ssl,
         "verify_certs": False,
         "http_compress": True,
+        "timeout": config.timeout_s,
     }
 
     if config.auth_type == OpenSearchAuthType.NONE:

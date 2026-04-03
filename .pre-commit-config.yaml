@@ -18,6 +18,7 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+        stages: [pre-commit]
 
       - id: no-ai-tool-names
         name: "No AI tool names in commit message"

@@ -8,6 +8,28 @@ alwaysApply: true
 Every non-trivial request runs as a chain of isolated subagents.
 Each stage receives only its handoff document — no prior conversation history.
 
+## Clarification Before Action
+
+**Always gather the full picture before moving forward.**
+
+If a task or request is unclear — ask questions first, then act.
+Better to ask once than to implement the wrong thing.
+
+| Situation | Action |
+|---|---|
+| Requirement is ambiguous | Ask before starting Stage 1 |
+| Two valid interpretations exist | List both, ask which one |
+| Assumption would affect architecture | State it explicitly, ask to confirm |
+| Scope is unclear (1 file or 10?) | Ask before any pipeline stage |
+
+**Never proceed on silent assumptions.**
+If you assumed something — say it out loud and give the user a chance to correct it.
+
+This applies at every stage: orchestrator, Context Gatherer, Architect, Implementer.
+Clarifying questions should be asked **all at once** — not one by one.
+
+---
+
 ## Rule Priority & Conflict Resolution
 
 Three knowledge tiers — higher tier always wins:

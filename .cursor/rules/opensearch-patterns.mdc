@@ -133,6 +133,45 @@ OpenSearch `_rank_eval` supports **only**: `dcg`, `precision`, `recall`, `mean_r
 `ndcg` and `expected_reciprocal_rank` are **Elasticsearch-only** and cause a 400 `x_content_parse_exception`.
 For NDCG use the Python-computed `evaluate()` in `eval_service.py`.
 
+## Hybrid Combination (Python-side)
+
+Wide BM25 + wide KNN results are merged in `_hybrid_combine`:
+1. Min-max normalize BM25 scores independently
+2. Min-max normalize KNN scores independently
+3. Combine: `bm25_weight * bm25_norm + knn_weight * knn_norm`
+4. Sort descending, truncate to `params.size`
+
+```python
+def _hybrid_combine(
+    bm25_hits: list[dict],
+    knn_hits: list[dict],
+    bm25_weight: float,
+    knn_weight: float,
+    size: int,
+) -> list[dict]:
+    # min-max normalize each list separately, then weighted sum
+    ...
+```
+
+## RRF Combination (Python-side)
+
+`_RRF_K = 60`. For each document: sum `1 / (_RRF_K + rank)` from each result list.
+
+```python
+_RRF_K = 60
+
+# per list contribution
+rrf_bm25 = 1.0 / (_RRF_K + rank_in_bm25)
+rrf_knn  = 1.0 / (_RRF_K + rank_in_knn)
+combined = rrf_bm25 + rrf_knn
+```
+
+Sort by `combined` descending, slice to `params.size`.
+
+> **Note:** after both Hybrid and RRF combination, `_minmax(hits)` must be called
+> in `search_service.py` to normalise final scores to [0, 1].
+> See `.cursor/rules/score-normalization.mdc`.
+
 ## Error Handling
 
 Catch `opensearchpy.exceptions.NotFoundError` and `TransportError` at the repository level.

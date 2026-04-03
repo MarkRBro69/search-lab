@@ -1,0 +1,115 @@
+---
+description: Motor (async MongoDB) patterns: id/_id mapping, insert/find, cursors, projections, singleton DB
+globs: "src/modules/**/infrastructure/**/*.py"
+alwaysApply: false
+---
+
+# Motor (Async MongoDB) Patterns
+
+## id → _id Mapping
+
+Store UUID string primary keys as MongoDB `_id`; restore `id` when reading.
+Every repository module must define `_to_mongo` / `_from_mongo` helpers.
+
+```python
+def _to_mongo(doc: dict) -> dict:
+    """Replace 'id' key with '_id' for MongoDB storage."""
+    d = dict(doc)
+    d["_id"] = d.pop("id")
+    return d
+
+def _from_mongo(doc: dict | None) -> dict | None:
+    """Restore 'id' from '_id' when reading from MongoDB."""
+    if doc is None:
+        return None
+    d = dict(doc)
+    d["id"] = str(d.pop("_id"))
+    return d
+```
+
+Queries by key use `{"_id": entity_id}` after insert.
+
+## Insert
+
+```python
+await db[COLLECTION].insert_one(_to_mongo(entity.model_dump()))
+```
+
+## Find One
+
+```python
+doc = await db[COLLECTION].find_one({"_id": entity_id})
+return MyModel.model_validate(_from_mongo(doc)) if doc else None
+```
+
+## List (with cap and sort)
+
+Always pass an explicit length cap to avoid unbounded loads.
+Default sort: newest first (`created_at`, `-1`).
+
+```python
+cursor = db[COLLECTION].find().sort("created_at", -1)
+docs = await cursor.to_list(length=200)
+return [MyModel.model_validate(_from_mongo(d)) for d in docs]
+```
+
+## Projection for List Views
+
+Omit heavy fields (e.g. nested results arrays) when listing; set defaults before
+validation if the field is required by the model.
+
+```python
+cursor = db[COLLECTION].find({}, {"results": 0}).sort("created_at", -1)
+docs = await cursor.to_list(length=100)
+for d in docs:
+    d.setdefault("results", {})
+return [MyModel.model_validate(_from_mongo(d)) for d in docs]
+```
+
+## Singleton DB Client
+
+Motor client and database are created lazily in `get_db()`.
+FastAPI lifespan calls `get_db()` at startup to warm up the connection.
+Routes inject it via `Depends(get_db)`.
+
+```python
+# src/shared/infrastructure/mongodb.py
+_client: AsyncIOMotorClient | None = None
+
+def get_db() -> AsyncIOMotorDatabase:
+    global _client
+    if _client is None:
+        _client = AsyncIOMotorClient(settings.MONGODB_URL)
+    return _client[settings.MONGODB_DB]
+
+async def close_mongo() -> None:
+    global _client
+    if _client is not None:
+        _client.close()
+        _client = None
+```
+
+## Unit Test Coverage (Non-Negotiable)
+
+Every infrastructure repository module must have tests covering:
+- `_to_mongo` / `_from_mongo` round-trip
+- CRUD happy path with mocked Motor client
+- Not-found path (returns `None`, does not raise)
+
+## Anti-Patterns
+
+### Duplicate id/_id fields
+
+**Wrong:** treating `_id` as an unrelated ObjectId alongside a separate `id` field.
+**Do:** keep a single string `id` on Pydantic models, map to `_id` on write, back to `id`
+on read via `_to_mongo` / `_from_mongo`.
+
+### Unbounded cursor
+
+```python
+# ❌ WRONG — may load millions of documents
+docs = await db[COLLECTION].find().to_list(None)
+
+# ✅ CORRECT — always cap
+docs = await db[COLLECTION].find().to_list(length=500)
+```

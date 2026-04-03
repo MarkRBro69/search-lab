@@ -67,5 +67,5 @@ All detailed rules live in `.cursor/rules/`. Read the relevant file before editi
 | `opensearch-patterns.mdc` | `src/modules/search/infrastructure/**` | Query DSL, index naming, bulk ops |
 | `experiments-patterns.mdc` | `src/modules/experiments/**` | Algorithm/Template/BenchmarkRun patterns |
 | `llm-agent-integration.mdc` | `src/modules/agents/**` | BaseLLMClient, tool schemas, retry |
-| `communication.mdc` | always | Language (ru), shell (PowerShell), response style |
+| `communication.mdc` | always | Team conventions: code/commit language, response style defaults |
 | `local/my-profile.mdc` | always | Personal developer profile (gitignored) |

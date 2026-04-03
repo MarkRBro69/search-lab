@@ -8,6 +8,43 @@ alwaysApply: true
 Every non-trivial request runs as a chain of isolated subagents.
 Each stage receives only its handoff document — no prior conversation history.
 
+## Rule Priority & Conflict Resolution
+
+Three knowledge tiers — higher tier always wins:
+
+```
+1. ~/.cursor/skills/        — global personal   (highest priority)
+2. .cursor/rules/local/     — project personal
+3. .cursor/rules/           — team / project    (lowest priority)
+```
+
+Apply this priority in **all decisions**:
+
+| Decision | How to resolve |
+|---|---|
+| Tool / library choice | Use what the higher-priority tier specifies |
+| Pattern selection | Personal pattern overrides team pattern |
+| Conflicting conventions | Higher tier wins, no need to ask |
+| Missing guidance in team rules | Look up the chain: local → global |
+
+**Examples:**
+```
+Team rule says: use pattern A
+My local note says: use pattern B
+→ Use pattern B (local beats team)
+
+Global skill says: never use sync HTTP calls
+Team rule is silent on this
+→ Follow global skill (it fills the gap)
+
+Global skill and local note conflict
+→ Local note wins (more specific, most recent)
+```
+
+Only escalate to the user when **all three tiers are silent** on a topic.
+
+---
+
 ## Tool Priority
 
 For file operations always prefer built-in tools over shell commands:
@@ -359,10 +396,18 @@ Answer each question explicitly:
 [ ] 6. Did this workflow reveal a gap in the current rules?
 ```
 
-For every "yes" — follow the `knowledge-update` skill to produce proposals.
-For all "no" — write: `No knowledge update needed — [reason].`
+For every "yes" — follow the `knowledge-update` skill.
 
-Never apply changes without explicit confirmation.
+**Default targets (auto-apply, no approval needed):**
+- Cross-project patterns → `~/.cursor/skills/`
+- Project-specific patterns, notes, ADR drafts, doc drafts → `.cursor/rules/local/`
+
+**Requires explicit user request:**
+- Team/shared rules → `.cursor/rules/` (committed to git)
+- Formalized ADRs → `docs/decisions/ADR-NNN.md`
+- Shared documentation → `docs/`
+
+For all "no" — write: `No knowledge update needed — [reason].`
 
 ---
 

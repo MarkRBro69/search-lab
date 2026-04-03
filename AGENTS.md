@@ -74,6 +74,20 @@ src/modules/
 - Cross-module calls go through `src/modules/{name}/api.py` only.
 - Shared base classes and config live in `src/shared/`.
 
+## Rule Priority & Conflict Resolution
+
+Three knowledge tiers — higher tier always wins:
+
+```
+1. ~/.cursor/skills/        — global personal   (highest priority)
+2. .cursor/rules/local/     — project personal  (gitignored)
+3. .cursor/rules/           — team / project    (lowest priority, committed)
+```
+
+Apply this priority for **all decisions**: tool choice, pattern selection, resolving contradictions between rules.
+When tiers conflict — higher tier wins, no need to ask.
+Only escalate to the user when **all three tiers are silent** on a topic.
+
 ## Detailed Rules
 
 All coding rules are in `.cursor/rules/`. Read the relevant file before editing:
@@ -81,7 +95,7 @@ All coding rules are in `.cursor/rules/`. Read the relevant file before editing:
 | File | Scope | Purpose |
 |---|---|---|
 | `project-overview.mdc` | always | Stack summary, global constraints |
-| `communication.mdc` | always | Language (ru), shell (PowerShell), response style |
+| `communication.mdc` | always | Team conventions: code/commit language, response style defaults |
 | `architecture.mdc` | always | Module structure, dependency rules |
 | `agent-workflow.mdc` | always | Pre-Stage 0 decomposition + 5-stage pipeline per task; deviation requires explicit user approval |
 | `tooling.mdc` | always | uv, ruff, pytest commands |
@@ -89,7 +103,8 @@ All coding rules are in `.cursor/rules/`. Read the relevant file before editing:
 | `logging.mdc` | always | structlog usage, required fields |
 | `fastapi-conventions.mdc` | `**/*.py` | Routers, Pydantic, error handling |
 | `testing.mdc` | `tests/**/*.py` | Test structure, fixtures, naming |
-| `opensearch-patterns.mdc` | `src/modules/search/infrastructure/**` | Query DSL, index naming |
+| `opensearch-patterns.mdc` | `src/modules/search/infrastructure/**` | Query DSL, index naming, Hybrid/RRF combination |
+| `motor-mongodb.mdc` | `src/modules/**/infrastructure/**` | Motor patterns: id/_id mapping, insert/find, projections |
 | `score-normalization.mdc` | always | Score contract [0,1] for all modes; benchmark comparability |
 | `experiments-patterns.mdc` | `src/modules/experiments/**` | Algorithm/Template/BenchmarkRun patterns |
 | `llm-agent-integration.mdc` | `src/modules/agents/**` | LLM client patterns, tool schemas |
